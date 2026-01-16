@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Volleyball Play Analyzer</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🏐 Volleyball Play Analyzer</h1>
+      <p>Upload video or describe plays to get AI-powered coaching suggestions</p>
+    </header>
+
+    <main>
+      <div class="upload-section">
+        <h2>Upload Video</h2>
+        <form id="uploadForm" enctype="multipart/form-data">
+          <div class="drop-zone" id="dropZone">
+            <div class="drop-zone-content">
+              <span class="drop-icon">📹</span>
+              <p>Drag & drop your video here or click to browse</p>
+              <p class="file-types">Supported: MP4, WebM, MOV, AVI (max 100MB)</p>
+            </div>
+            <input type="file" id="videoInput" name="video" accept="video/*" hidden>
+          </div>
+          <div id="filePreview" class="file-preview hidden">
+            <video id="videoPreview" controls></video>
+            <p id="fileName"></p>
+          </div>
+          
+          <div class="options-grid">
+            <div class="form-group">
+              <label for="framesPerSecond">Frames per Second</label>
+              <input type="number" id="framesPerSecond" name="framesPerSecond" value="1" min="0.1" max="5" step="0.1">
+              <p class="hint">Higher = more detail, higher cost (0.1-5 fps)</p>
+            </div>
+            <div class="form-group">
+              <label for="maxFrames">Max Frames to Analyze</label>
+              <input type="number" id="maxFrames" name="maxFrames" value="15" min="1" max="50">
+              <p class="hint">Limit frames to control cost (1-50 frames)</p>
+            </div>
+          </div>
+          
+          <div id="costEstimate" class="cost-estimate">
+            <span>💰 Estimated cost: </span><strong id="estimatedCost">~$0.04</strong>
+          </div>
+          
+          <div class="form-group">
+            <label for="description">Play Description (optional)</label>
+            <textarea id="description" name="description" placeholder="Describe the play context, e.g., 'Outside hitter approach from position 4, setter running a quick set...'"></textarea>
+          </div>
+          <button type="submit" id="analyzeBtn" class="btn-primary">Analyze Play</button>
+        </form>
+      </div>
+
+      <div class="divider">
+        <span>OR</span>
+      </div>
+
+      <div class="text-section">
+        <h2>Describe a Play</h2>
+        <form id="textForm">
+          <div class="form-group">
+            <label for="playDescription">Play Description</label>
+            <textarea id="playDescription" name="playDescription" placeholder="Describe the volleyball play in detail. Include player positions, type of play, and any specific situations you want feedback on..." rows="5"></textarea>
+          </div>
+          <button type="submit" class="btn-secondary">Get Coaching Tips</button>
+        </form>
+      </div>
+
+      <div id="results" class="results hidden">
+        <h2>📋 Analysis Results</h2>
+        <div id="analysisContent"></div>
+      </div>
+
+      <div id="loading" class="loading hidden">
+        <div class="spinner"></div>
+        <p>Analyzing your play...</p>
+      </div>
+    </main>
+
+    <footer>
+      <p>Powered by AI • Built for volleyball coaches and players</p>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
