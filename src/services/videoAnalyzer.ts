@@ -3,21 +3,30 @@ import fs from 'fs';
 import path from 'path';
 import { extractFrames, cleanupFrames, FrameExtractionResult } from './frameExtractor';
 
+// Lazy-initialized OpenAI client
+let openaiClient: OpenAI | null = null;
+
 // Initialize OpenAI client (supports both direct OpenAI and Azure)
-function createOpenAIClient(): OpenAI {
+function getOpenAIClient(): OpenAI {
+  if (openaiClient) {
+    return openaiClient;
+  }
+  
   const useAzure = process.env.USE_AZURE === 'true';
   
   if (useAzure) {
-    return new AzureOpenAI({
+    openaiClient = new AzureOpenAI({
       apiKey: process.env.AZURE_OPENAI_API_KEY,
       endpoint: process.env.AZURE_OPENAI_ENDPOINT,
       apiVersion: '2024-02-15-preview'
     });
+  } else {
+    openaiClient = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY
+    });
   }
   
-  return new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY
-  });
+  return openaiClient;
 }
 
 function getModelName(): string {
@@ -27,8 +36,6 @@ function getModelName(): string {
   }
   return 'gpt-4o';
 }
-
-const openai = createOpenAIClient();
 
 export interface VolleyballAnalysis {
   playType: string;
@@ -128,7 +135,7 @@ Please analyze the technique, positioning, and execution visible in these frames
       ...imageContents
     ];
 
-    const response = await openai.chat.completions.create({
+    const response = await getOpenAIClient().chat.completions.create({
       model: getModelName(),
       messages: [
         { role: 'system', content: systemPrompt },
@@ -162,7 +169,7 @@ async function analyzeTextOnly(
   systemPrompt: string
 ): Promise<VolleyballAnalysis> {
   try {
-    const response = await openai.chat.completions.create({
+    const response = await getOpenAIClient().chat.completions.create({
       model: getModelName(),
       messages: [
         { role: 'system', content: systemPrompt },
