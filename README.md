@@ -9,6 +9,7 @@ AI-powered web application for analyzing volleyball plays using video frame extr
 - **GPT-4 Vision Analysis**: AI analyzes actual video frames to see player movements
 - **Configurable Cost Control**: Adjust frame rate and max frames to control API costs
 - **Text-Based Analysis**: Describe plays to get instant coaching feedback
+- **Motion-Based Trimming**: Automatically remove non-play time from single-camera static recordings using frame-difference detection (no AI required)
 - **Detailed Coaching Insights**:
   - Play type identification
   - Player positioning analysis
@@ -103,7 +104,9 @@ volleyball/
 │   │   └── videoRoutes.ts        # API routes
 │   └── services/
 │       ├── videoAnalyzer.ts      # AI analysis service
-│       └── frameExtractor.ts     # ffmpeg frame extraction
+│       ├── frameExtractor.ts     # ffmpeg frame extraction
+│       ├── motionDetector.ts     # Motion-based play segment detection
+│       └── videoTrimmer.ts       # ffmpeg segment concatenation
 ├── public/
 │   ├── index.html                # Frontend UI
 │   ├── styles.css                # Styles
@@ -131,6 +134,71 @@ Analyze a play based on text description only.
 { "description": "Your play description" }
 ```
 
-## License
+---
+
+## Motion-Based Video Trimming
+
+`POST /api/videos/trim` removes non-play periods from a static-camera recording using motion detection.  
+No AI or third-party services are required — only ffmpeg.
+
+### How It Works
+
+1. Frames are sampled from the video at a configurable rate (default 2 fps) and scaled down to 160×90 grayscale pixels.
+2. The mean absolute pixel difference between consecutive frames is computed as the **motion score**.
+3. Scores are smoothed with a rolling-average window to reduce noise.
+4. Frames above a configurable threshold are marked as "active".
+5. Active runs are grouped into segments, short segments are dropped, and configurable pre/post-roll padding is added.
+6. Overlapping padded segments are merged; the final list is fed to ffmpeg `trim + concat` to produce a clean MP4.
+
+### Endpoint
+
+`POST /api/videos/trim` — `multipart/form-data`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `video` | File | **required** | Video file (MP4, WebM, MOV, AVI) |
+| `sampleFps` | number | `2` | Frames to sample per second for motion analysis |
+| `threshold` | number | `0.02` | Motion score threshold (0–1); lower = more sensitive |
+| `minSegmentLength` | number | `3` | Minimum play-segment length in seconds |
+| `preRoll` | number | `1` | Seconds of context to keep before each segment |
+| `postRoll` | number | `1` | Seconds of context to keep after each segment |
+| `smoothingWindow` | number | `3` | Rolling-average window size for score smoothing |
+
+**Success response** (`200`):
+```json
+{
+  "success": true,
+  "totalSegments": 4,
+  "segments": [
+    { "start": 12.5, "end": 38.0 },
+    { "start": 55.0, "end": 92.5 }
+  ],
+  "downloadUrl": "/uploads/trimmed-1234567890-123456789.mp4"
+}
+```
+
+**Error response** (`422`) when no motion is detected:
+```json
+{
+  "error": "No motion segments detected. Try lowering the threshold.",
+  "segments": []
+}
+```
+
+### Example (curl)
+
+```bash
+curl -X POST http://localhost:3000/api/videos/trim \
+  -F "video=@game.mp4" \
+  -F "threshold=0.015" \
+  -F "preRoll=2" \
+  -F "postRoll=2"
+```
+
+Download the result:
+
+```bash
+curl -O http://localhost:3000/uploads/trimmed-<id>.mp4
+```
 
 ISC
