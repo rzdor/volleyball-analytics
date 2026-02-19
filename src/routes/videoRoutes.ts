@@ -6,7 +6,6 @@ import https from 'https';
 import http from 'http';
 import { randomUUID } from 'crypto';
 import rateLimit from 'express-rate-limit';
-import { yt_validate, video_info as ytVideoInfo } from 'play-dl';
 import { analyzeVolleyballVideo, AnalysisOptions } from '../services/videoAnalyzer';
 import { detectMotionSegments, MotionDetectorOptions } from '../services/motionDetector';
 import { trimVideoToSegments } from '../services/videoTrimmer';
@@ -148,7 +147,7 @@ const MAX_FPS = 5;
 const MIN_FRAMES = 1;
 const MAX_FRAMES = 50;
 
-function downloadVideoFromUrl(url: string, destPath: string, skipMimeCheck = false): Promise<string> {
+function downloadVideoFromUrl(url: string, destPath: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const parsedUrl = new URL(url);
     const requester = parsedUrl.protocol === 'https:' ? https : http;
@@ -156,7 +155,7 @@ function downloadVideoFromUrl(url: string, destPath: string, skipMimeCheck = fal
     const req = requester.get(url, (res) => {
       // Follow one redirect
       if ((res.statusCode === 301 || res.statusCode === 302) && res.headers.location) {
-        return downloadVideoFromUrl(res.headers.location, destPath, skipMimeCheck).then(resolve).catch(reject);
+        return downloadVideoFromUrl(res.headers.location, destPath).then(resolve).catch(reject);
       }
 
       if (res.statusCode !== 200) {
@@ -164,7 +163,7 @@ function downloadVideoFromUrl(url: string, destPath: string, skipMimeCheck = fal
       }
 
       const contentType = (res.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
-      if (!skipMimeCheck && !ALLOWED_VIDEO_MIME_TYPES.has(contentType)) {
+      if (!ALLOWED_VIDEO_MIME_TYPES.has(contentType)) {
         res.resume();
         return reject(new Error(`Unsupported content type: ${contentType}. Only video files are allowed.`));
       }
@@ -206,50 +205,6 @@ function downloadVideoFromUrl(url: string, destPath: string, skipMimeCheck = fal
   });
 }
 
-export function isYouTubeUrl(url: string): boolean {
-  return yt_validate(url) === 'video';
-}
-
-interface VideoFormat {
-  mimeType?: string;
-  url?: string;
-  height?: number;
-  audioQuality?: string;
-  contentLength?: string;
-}
-
-export async function downloadYouTubeVideo(url: string, destPath: string): Promise<void> {
-  const info = await ytVideoInfo(url);
-
-  const allFormats = (info.format as VideoFormat[]).filter(
-    (f) => f.mimeType?.startsWith('video/') && f.url,
-  );
-
-  if (allFormats.length === 0) {
-    throw new Error('No downloadable video format found for this YouTube video');
-  }
-
-  // Prefer combined (video+audio) MP4 at up to 720p, fall back to video-only MP4, then anything
-  const mp4 = allFormats.filter((f) => f.mimeType?.includes('mp4'));
-  const combined = mp4.filter((f) => f.audioQuality).sort((a, b) => (b.height || 0) - (a.height || 0));
-  const videoOnly = mp4.filter((f) => !f.audioQuality).sort((a, b) => (b.height || 0) - (a.height || 0));
-
-  const chosen = (
-    combined.find((f) => (f.height || 0) <= 720) ||
-    videoOnly.find((f) => (f.height || 0) <= 720) ||
-    combined[0] || videoOnly[0] || allFormats[0]
-  )!;
-
-  if (chosen.contentLength) {
-    const bytes = parseInt(chosen.contentLength, 10);
-    if (bytes > URL_DOWNLOAD_SIZE_LIMIT) {
-      throw new Error('YouTube video exceeds the 100 MB size limit. Try a shorter clip.');
-    }
-  }
-
-  await downloadVideoFromUrl(chosen.url!, destPath, true);
-}
-
 const urlAnalysisLimiter = rateLimit({ windowMs: 60_000, limit: 5, standardHeaders: true, legacyHeaders: false });
 
 router.post('/analyze-url', urlAnalysisLimiter, async (req: Request, res: Response): Promise<void> => {
@@ -280,11 +235,7 @@ router.post('/analyze-url', urlAnalysisLimiter, async (req: Request, res: Respon
     const filename = `url-${randomUUID()}${ext}`;
     videoPath = path.join(__dirname, '../../uploads', filename);
 
-    if (isYouTubeUrl(url)) {
-      await downloadYouTubeVideo(url, videoPath);
-    } else {
-      await downloadVideoFromUrl(url, videoPath);
-    }
+    await downloadVideoFromUrl(url, videoPath);
 
     const options: AnalysisOptions = {
       framesPerSecond: parseFloat(framesPerSecond) || 1,
