@@ -81,6 +81,11 @@ Upload a video file for analysis.
 - **Body**: `multipart/form-data` with `video` file and optional `description`
 - **Response**: Analysis results with coaching suggestions
 
+### POST /api/videos/analyze-url
+Analyze a video by URL (YouTube or direct file link).
+- **Body**: `{ "url": "https://...", "description": "..." }`
+- **Response**: Analysis results with coaching suggestions
+
 ### POST /api/videos/analyze
 Analyze a play based on text description.
 - **Body**: `{ "description": "Your play description" }`
@@ -126,8 +131,24 @@ Upload a video file for frame-by-frame AI analysis.
 - `framesPerSecond` - Frame extraction rate (default: 1)
 - `maxFrames` - Maximum frames to analyze (default: 15)
 
-### POST /api/videos/analyze
-Analyze a play based on text description only.
+### POST /api/videos/analyze-url
+Analyze a video provided as a URL.
+
+**Body** (`application/json`):
+- `url` - URL of the video (required). Supports:
+  - **YouTube** links (`youtube.com/watch?v=…`, `youtu.be/…`)
+  - **Direct video file** URLs pointing to MP4, WebM, MOV, or AVI files
+- `description` - Play context (optional)
+- `framesPerSecond` - Frame extraction rate (default: 1)
+- `maxFrames` - Maximum frames to analyze (default: 20)
+
+> **Note**: Videos are streamed server-side; the client only needs to supply the URL. YouTube videos are downloaded using the highest-quality combined (video + audio) MP4 stream at ≤720p, or the best available video-only MP4 if no combined stream is offered. The file size limit is 100 MB.
+
+```bash
+curl -X POST http://localhost:3000/api/videos/analyze-url \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://www.youtube.com/watch?v=EXAMPLE","description":"spike attempt from position 4"}'
+```
 
 **Body** (`application/json`):
 ```json

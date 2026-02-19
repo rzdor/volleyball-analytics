@@ -2,8 +2,11 @@ import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import https from 'https';
+import http from 'http';
 import { randomUUID } from 'crypto';
 import rateLimit from 'express-rate-limit';
+import { yt_validate, video_info as ytVideoInfo } from 'play-dl';
 import { analyzeVolleyballVideo, AnalysisOptions } from '../services/videoAnalyzer';
 import { detectMotionSegments, MotionDetectorOptions } from '../services/motionDetector';
 import { trimVideoToSegments } from '../services/videoTrimmer';
@@ -51,10 +54,10 @@ router.post('/upload', upload.single('video'), async (req: Request, res: Respons
     };
     
     // Validate options
-    if (options.framesPerSecond! < 0.1) options.framesPerSecond = 0.1;
-    if (options.framesPerSecond! > 5) options.framesPerSecond = 5;
-    if (options.maxFrames! < 1) options.maxFrames = 1;
-    if (options.maxFrames! > 50) options.maxFrames = 50;
+    if (options.framesPerSecond! < MIN_FPS) options.framesPerSecond = MIN_FPS;
+    if (options.framesPerSecond! > MAX_FPS) options.framesPerSecond = MAX_FPS;
+    if (options.maxFrames! < MIN_FRAMES) options.maxFrames = MIN_FRAMES;
+    if (options.maxFrames! > MAX_FRAMES) options.maxFrames = MAX_FRAMES;
 
     const analysis = await analyzeVolleyballVideo(videoPath, req.body.description || '', options);
 
@@ -132,6 +135,178 @@ router.post('/trim', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: t
       try { fs.unlinkSync(outputPath); } catch { /* ignore */ }
     }
     res.status(500).json({ error: 'Failed to trim video' });
+  }
+});
+
+const ALLOWED_VIDEO_MIME_TYPES = new Set([
+  'video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo',
+  'video/x-matroska', 'video/mpeg', 'video/ogg',
+]);
+const URL_DOWNLOAD_SIZE_LIMIT = 100 * 1024 * 1024; // 100 MB
+const MIN_FPS = 0.1;
+const MAX_FPS = 5;
+const MIN_FRAMES = 1;
+const MAX_FRAMES = 50;
+
+function downloadVideoFromUrl(url: string, destPath: string, skipMimeCheck = false): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const parsedUrl = new URL(url);
+    const requester = parsedUrl.protocol === 'https:' ? https : http;
+
+    const req = requester.get(url, (res) => {
+      // Follow one redirect
+      if ((res.statusCode === 301 || res.statusCode === 302) && res.headers.location) {
+        return downloadVideoFromUrl(res.headers.location, destPath, skipMimeCheck).then(resolve).catch(reject);
+      }
+
+      if (res.statusCode !== 200) {
+        return reject(new Error(`Remote server returned status ${res.statusCode}`));
+      }
+
+      const contentType = (res.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+      if (!skipMimeCheck && !ALLOWED_VIDEO_MIME_TYPES.has(contentType)) {
+        res.resume();
+        return reject(new Error(`Unsupported content type: ${contentType}. Only video files are allowed.`));
+      }
+
+      let received = 0;
+      const file = fs.createWriteStream(destPath);
+
+      res.on('data', (chunk: Buffer) => {
+        received += chunk.length;
+        if (received > URL_DOWNLOAD_SIZE_LIMIT) {
+          req.destroy();
+          file.destroy();
+          fs.unlink(destPath, () => {});
+          reject(new Error('Video file exceeds the 100 MB size limit'));
+        }
+      });
+
+      res.pipe(file);
+
+      file.on('finish', () => {
+        file.close(() => resolve(destPath));
+      });
+      file.on('error', (err) => {
+        fs.unlink(destPath, () => {});
+        reject(err);
+      });
+    });
+
+    req.on('error', (err) => {
+      fs.unlink(destPath, () => {});
+      reject(err);
+    });
+
+    req.setTimeout(30_000, () => {
+      req.destroy();
+      fs.unlink(destPath, () => {});
+      reject(new Error('Request timed out while downloading video'));
+    });
+  });
+}
+
+export function isYouTubeUrl(url: string): boolean {
+  return yt_validate(url) === 'video';
+}
+
+interface VideoFormat {
+  mimeType?: string;
+  url?: string;
+  height?: number;
+  audioQuality?: string;
+  contentLength?: string;
+}
+
+export async function downloadYouTubeVideo(url: string, destPath: string): Promise<void> {
+  const info = await ytVideoInfo(url);
+
+  const allFormats = (info.format as VideoFormat[]).filter(
+    (f) => f.mimeType?.startsWith('video/') && f.url,
+  );
+
+  if (allFormats.length === 0) {
+    throw new Error('No downloadable video format found for this YouTube video');
+  }
+
+  // Prefer combined (video+audio) MP4 at up to 720p, fall back to video-only MP4, then anything
+  const mp4 = allFormats.filter((f) => f.mimeType?.includes('mp4'));
+  const combined = mp4.filter((f) => f.audioQuality).sort((a, b) => (b.height || 0) - (a.height || 0));
+  const videoOnly = mp4.filter((f) => !f.audioQuality).sort((a, b) => (b.height || 0) - (a.height || 0));
+
+  const chosen = (
+    combined.find((f) => (f.height || 0) <= 720) ||
+    videoOnly.find((f) => (f.height || 0) <= 720) ||
+    combined[0] || videoOnly[0] || allFormats[0]
+  )!;
+
+  if (chosen.contentLength) {
+    const bytes = parseInt(chosen.contentLength, 10);
+    if (bytes > URL_DOWNLOAD_SIZE_LIMIT) {
+      throw new Error('YouTube video exceeds the 100 MB size limit. Try a shorter clip.');
+    }
+  }
+
+  await downloadVideoFromUrl(chosen.url!, destPath, true);
+}
+
+const urlAnalysisLimiter = rateLimit({ windowMs: 60_000, limit: 5, standardHeaders: true, legacyHeaders: false });
+
+router.post('/analyze-url', urlAnalysisLimiter, async (req: Request, res: Response): Promise<void> => {
+  const { url, description, framesPerSecond, maxFrames } = req.body;
+  let videoPath: string | undefined;
+
+  try {
+    if (!url || typeof url !== 'string') {
+      res.status(400).json({ error: 'A video URL is required' });
+      return;
+    }
+
+    // Validate URL scheme
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(url);
+    } catch {
+      res.status(400).json({ error: 'Invalid URL format' });
+      return;
+    }
+
+    if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+      res.status(400).json({ error: 'Only http and https URLs are supported' });
+      return;
+    }
+
+    const ext = path.extname(parsedUrl.pathname) || '.mp4';
+    const filename = `url-${randomUUID()}${ext}`;
+    videoPath = path.join(__dirname, '../../uploads', filename);
+
+    if (isYouTubeUrl(url)) {
+      await downloadYouTubeVideo(url, videoPath);
+    } else {
+      await downloadVideoFromUrl(url, videoPath);
+    }
+
+    const options: AnalysisOptions = {
+      framesPerSecond: parseFloat(framesPerSecond) || 1,
+      maxFrames: parseInt(maxFrames) || 20,
+    };
+
+    if (options.framesPerSecond! < MIN_FPS) options.framesPerSecond = MIN_FPS;
+    if (options.framesPerSecond! > MAX_FPS) options.framesPerSecond = MAX_FPS;
+    if (options.maxFrames! < MIN_FRAMES) options.maxFrames = MIN_FRAMES;
+    if (options.maxFrames! > MAX_FRAMES) options.maxFrames = MAX_FRAMES;
+
+    const analysis = await analyzeVolleyballVideo(videoPath, description || '', options);
+
+    res.json({ success: true, filename, options, analysis });
+  } catch (error) {
+    console.error('URL analyze error:', error);
+    const message = error instanceof Error ? error.message : 'Failed to process video from URL';
+    res.status(500).json({ error: message });
+  } finally {
+    if (videoPath && fs.existsSync(videoPath)) {
+      try { fs.unlinkSync(videoPath); } catch { /* ignore */ }
+    }
   }
 });
 
