@@ -5,7 +5,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const videoPreview = document.getElementById('videoPreview');
   const fileName = document.getElementById('fileName');
   const uploadForm = document.getElementById('uploadForm');
-  const textForm = document.getElementById('textForm');
   const results = document.getElementById('results');
   const analysisContent = document.getElementById('analysisContent');
   const loading = document.getElementById('loading');
@@ -104,34 +103,15 @@ document.addEventListener('DOMContentLoaded', () => {
     await analyzePlay('/api/videos/upload', formData);
   });
 
-  // Text form submission
-  textForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    
-    const description = document.getElementById('playDescription').value.trim();
-    if (!description) {
-      alert('Please describe the play');
-      return;
-    }
-
-    await analyzePlay('/api/videos/analyze', { description }, true);
-  });
-
-  async function analyzePlay(url, data, isJson = false) {
+  async function analyzePlay(url, data) {
     showLoading(true);
     results.classList.add('hidden');
 
     try {
       const options = {
-        method: 'POST'
+        method: 'POST',
+        body: data
       };
-
-      if (isJson) {
-        options.headers = { 'Content-Type': 'application/json' };
-        options.body = JSON.stringify(data);
-      } else {
-        options.body = data;
-      }
 
       const response = await fetch(url, options);
       const result = await response.json();
