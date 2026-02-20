@@ -6,14 +6,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const fileName = document.getElementById('fileName');
   const uploadForm = document.getElementById('uploadForm');
   const results = document.getElementById('results');
-  const analysisContent = document.getElementById('analysisContent');
   const loading = document.getElementById('loading');
   const analyzeBtn = document.getElementById('analyzeBtn');
-  const framesPerSecondInput = document.getElementById('framesPerSecond');
-  const maxFramesInput = document.getElementById('maxFrames');
-  const estimatedCostEl = document.getElementById('estimatedCost');
-  
-  let videoDuration = 0;
+  const segmentsSummary = document.getElementById('segmentsSummary');
+  const segmentsList = document.getElementById('segmentsList');
+  const downloadLink = document.getElementById('downloadLink');
+  const processedPreview = document.getElementById('processedPreview');
+
+  analyzeBtn.disabled = true;
 
   // Drag and drop handlers
   dropZone.addEventListener('click', () => videoInput.click());
@@ -53,12 +53,6 @@ document.addEventListener('DOMContentLoaded', () => {
     fileName.textContent = file.name + ' (' + formatFileSize(file.size) + ')';
     filePreview.classList.remove('hidden');
     analyzeBtn.disabled = false;
-    
-    // Get video duration for cost estimation
-    videoPreview.onloadedmetadata = () => {
-      videoDuration = videoPreview.duration;
-      updateCostEstimate();
-    };
   }
 
   function formatFileSize(bytes) {
@@ -66,23 +60,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   }
-  
-  function updateCostEstimate() {
-    const fps = parseFloat(framesPerSecondInput.value) || 1;
-    const maxFrames = parseInt(maxFramesInput.value) || 15;
-    
-    let estimatedFrames = Math.ceil(videoDuration * fps);
-    if (estimatedFrames > maxFrames) estimatedFrames = maxFrames;
-    if (estimatedFrames < 1) estimatedFrames = 1;
-    
-    // Cost: ~$0.002 per image (low detail) + ~$0.01 for text
-    const cost = (estimatedFrames * 0.002) + 0.01;
-    estimatedCostEl.textContent = `~$${cost.toFixed(3)} (${estimatedFrames} frames)`;
-  }
-  
-  // Update cost estimate when options change
-  framesPerSecondInput.addEventListener('input', updateCostEstimate);
-  maxFramesInput.addEventListener('input', updateCostEstimate);
 
   // Upload form submission
   uploadForm.addEventListener('submit', async (e) => {
@@ -96,14 +73,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const formData = new FormData();
     formData.append('video', file);
-    formData.append('description', document.getElementById('description').value);
-    formData.append('framesPerSecond', framesPerSecondInput.value);
-    formData.append('maxFrames', maxFramesInput.value);
 
-    await analyzePlay('/api/videos/upload', formData);
+    await processVideo('/api/videos/trim', formData);
   });
 
-  async function analyzePlay(url, data) {
+  async function processVideo(url, data) {
     showLoading(true);
     results.classList.add('hidden');
 
@@ -117,13 +91,13 @@ document.addEventListener('DOMContentLoaded', () => {
       const result = await response.json();
 
       if (result.success) {
-        displayResults(result.analysis);
+        displayResults(result);
       } else {
-        throw new Error(result.error || 'Analysis failed');
+        throw new Error(result.error || 'Processing failed');
       }
     } catch (error) {
       console.error('Error:', error);
-      alert('Failed to analyze play: ' + error.message);
+      alert('Failed to process video: ' + error.message);
     } finally {
       showLoading(false);
     }
@@ -136,53 +110,39 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function displayResults(analysis) {
-    analysisContent.innerHTML = `
-      <div class="analysis-section">
-        <h3>🏐 Play Type</h3>
-        <p>${analysis.playType}</p>
-      </div>
-      
-      <div class="analysis-section">
-        <h3>📍 Player Positioning</h3>
-        <p>${analysis.playerPositions}</p>
-      </div>
-      
-      <div class="analysis-section">
-        <h3>⚡ Technical Feedback</h3>
-        <ul>
-          ${analysis.technicalFeedback.map(item => `<li>${item}</li>`).join('')}
-        </ul>
-      </div>
-      
-      <div class="analysis-section">
-        <h3>🎯 Tactical Suggestions</h3>
-        <ul>
-          ${analysis.tacticalSuggestions.map(item => `<li>${item}</li>`).join('')}
-        </ul>
-      </div>
-      
-      <div class="analysis-section">
-        <h3>🏋️ Recommended Drills</h3>
-        <ul>
-          ${analysis.drillRecommendations.map(item => `<li>${item}</li>`).join('')}
-        </ul>
-      </div>
-      
-      <div class="analysis-section">
-        <h3>📝 Overall Assessment</h3>
-        <p>${analysis.overallAssessment}</p>
-      </div>
-      
-      ${analysis.framesAnalyzed ? `
-      <div class="analysis-meta">
-        <span>📊 Frames analyzed: ${analysis.framesAnalyzed}</span>
-        ${analysis.estimatedCost ? `<span>💰 API cost: ${analysis.estimatedCost}</span>` : ''}
-      </div>
-      ` : ''}
-    `;
-    
+  function displayResults(result) {
+    const segments = result.segments || [];
+    const totalDuration = segments.reduce((sum, seg) => sum + (seg.end - seg.start), 0);
+    segmentsSummary.textContent = `Detected ${segments.length} play segment${segments.length === 1 ? '' : 's'} covering ${formatSeconds(totalDuration)}.`;
+
+    segmentsList.innerHTML = segments.map((seg, idx) => {
+      return `<div class="analysis-section">
+        <h3>Segment ${idx + 1}</h3>
+        <p>${formatSeconds(seg.start)} → ${formatSeconds(seg.end)}</p>
+      </div>`;
+    }).join('');
+
+    const previewUrl = result.previewUrl || result.downloadUrl;
+    if (result.downloadUrl) {
+      downloadLink.href = result.downloadUrl;
+    } else {
+      downloadLink.removeAttribute('href');
+    }
+
+    if (previewUrl) {
+      processedPreview.src = previewUrl;
+      processedPreview.classList.remove('hidden');
+    } else {
+      processedPreview.classList.add('hidden');
+    }
+
     results.classList.remove('hidden');
     results.scrollIntoView({ behavior: 'smooth' });
+  }
+
+  function formatSeconds(value) {
+    const minutes = Math.floor(value / 60);
+    const seconds = Math.round(value % 60).toString().padStart(2, '0');
+    return `${minutes}:${seconds}`;
   }
 });
