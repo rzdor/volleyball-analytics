@@ -72,22 +72,6 @@ router.post('/upload', upload.single('video'), async (req: Request, res: Respons
   }
 });
 
-router.post('/analyze', async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { description } = req.body;
-    if (!description) {
-      res.status(400).json({ error: 'Play description is required' });
-      return;
-    }
-
-    const analysis = await analyzeVolleyballVideo(null, description);
-    res.json({ success: true, analysis });
-  } catch (error) {
-    console.error('Analysis error:', error);
-    res.status(500).json({ error: 'Failed to analyze play' });
-  }
-});
-
 router.post('/trim', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: true, legacyHeaders: false }), upload.single('video'), async (req: Request, res: Response): Promise<void> => {
   const videoPath = req.file?.path;
   let outputPath: string | undefined;
