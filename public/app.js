@@ -125,8 +125,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const previewUrl = result.previewUrl || result.downloadUrl;
     if (result.downloadUrl) {
       downloadLink.href = result.downloadUrl;
+      downloadLink.classList.remove('hidden');
     } else {
       downloadLink.removeAttribute('href');
+      downloadLink.classList.add('hidden');
     }
 
     if (previewUrl) {

@@ -86,6 +86,10 @@ router.post('/trim', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: t
 
 router.get('/download/:filename', (req: Request, res: Response): void => {
   const safeName = path.basename(req.params.filename);
+  if (!safeName.startsWith('trimmed-')) {
+    res.status(400).json({ error: 'Invalid file' });
+    return;
+  }
   const filePath = path.join(__dirname, '../../uploads', safeName);
 
   if (!fs.existsSync(filePath)) {
