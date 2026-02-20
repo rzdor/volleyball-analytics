@@ -81,6 +81,11 @@ Upload a video file for analysis.
 - **Body**: `multipart/form-data` with `video` file and optional `description`
 - **Response**: Analysis results with coaching suggestions
 
+### POST /api/videos/analyze-url
+Analyze a video from a direct public URL (e.g. Google Drive, Dropbox, or any cloud storage link).
+- **Body**: `{ "url": "https://...", "description": "..." }`
+- **Response**: Analysis results with coaching suggestions
+
 ### POST /api/videos/analyze
 Analyze a play based on text description.
 - **Body**: `{ "description": "Your play description" }`
@@ -126,8 +131,22 @@ Upload a video file for frame-by-frame AI analysis.
 - `framesPerSecond` - Frame extraction rate (default: 1)
 - `maxFrames` - Maximum frames to analyze (default: 15)
 
-### POST /api/videos/analyze
-Analyze a play based on text description only.
+### POST /api/videos/analyze-url
+Analyze a video provided as a URL.
+
+**Body** (`application/json`):
+- `url` - Direct URL to a publicly accessible video file (MP4, WebM, MOV, AVI) hosted on any cloud storage (e.g. Google Drive, Dropbox) — required
+- `description` - Play context (optional)
+- `framesPerSecond` - Frame extraction rate (default: 1)
+- `maxFrames` - Maximum frames to analyze (default: 20)
+
+> **Note**: The URL must point directly to a downloadable video file. The file size limit is 100 MB.
+
+```bash
+curl -X POST http://localhost:3000/api/videos/analyze-url \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://storage.example.com/game-clip.mp4","description":"spike attempt from position 4"}'
+```
 
 **Body** (`application/json`):
 ```json

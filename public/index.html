@@ -59,6 +59,40 @@
         <span>OR</span>
       </div>
 
+      <div class="url-section">
+        <h2>Analyze from URL</h2>
+        <form id="urlForm">
+          <div class="form-group">
+            <label for="videoUrl">Video URL</label>
+            <input type="url" id="videoUrl" name="videoUrl" placeholder="https://storage.example.com/game-clip.mp4">
+            <p class="hint">Direct link to a publicly accessible video file (MP4, WebM, MOV, AVI) — e.g. Google Drive, Dropbox (max 100 MB)</p>
+          </div>
+
+          <div class="options-grid">
+            <div class="form-group">
+              <label for="urlFramesPerSecond">Frames per Second</label>
+              <input type="number" id="urlFramesPerSecond" name="urlFramesPerSecond" value="1" min="0.1" max="5" step="0.1">
+              <p class="hint">Higher = more detail, higher cost (0.1–5 fps)</p>
+            </div>
+            <div class="form-group">
+              <label for="urlMaxFrames">Max Frames to Analyze</label>
+              <input type="number" id="urlMaxFrames" name="urlMaxFrames" value="15" min="1" max="50">
+              <p class="hint">Limit frames to control cost (1–50 frames)</p>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="urlDescription">Play Description (optional)</label>
+            <textarea id="urlDescription" name="urlDescription" placeholder="Describe the play context…"></textarea>
+          </div>
+          <button type="submit" class="btn-primary">Analyze from URL</button>
+        </form>
+      </div>
+
+      <div class="divider">
+        <span>OR</span>
+      </div>
+
       <div class="text-section">
         <h2>Describe a Play</h2>
         <form id="textForm">
