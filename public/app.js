@@ -109,7 +109,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function displayResults(result) {
-    const segments = (result.segments || []).filter(seg => typeof seg?.start === 'number' && typeof seg?.end === 'number');
+    const segments = result.segments || [];
     const totalDuration = segments.reduce((sum, seg) => sum + (seg.end - seg.start), 0);
     segmentsSummary.textContent = `Detected ${segments.length} play segment${segments.length === 1 ? '' : 's'} covering ${formatSeconds(totalDuration)}.`;
 

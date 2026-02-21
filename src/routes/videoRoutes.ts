@@ -93,12 +93,7 @@ router.get('/download/:filename', (req: Request, res: Response): void => {
     return;
   }
 
-  const safeName = path.basename(requested);
-  if (safeName !== requested) {
-    res.status(400).json({ error: 'Invalid file' });
-    return;
-  }
-  const filePath = path.join(__dirname, '../../uploads', safeName);
+  const filePath = path.join(__dirname, '../../uploads', requested);
 
   if (!fs.existsSync(filePath)) {
     res.status(404).json({ error: 'File not found' });
