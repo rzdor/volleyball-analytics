@@ -88,7 +88,7 @@ const TRIMMED_FILE_PATTERN = /^trimmed-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0
 const downloadLimiter = rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: true, legacyHeaders: false });
 
 router.get('/download/:filename', downloadLimiter, (req: Request, res: Response): void => {
-  const requested = req.params.filename;
+  const requested = Array.isArray(req.params.filename) ? req.params.filename[0] : req.params.filename;
   if (!TRIMMED_FILE_PATTERN.test(requested)) {
     res.status(400).json({ error: 'Invalid file' });
     return;
