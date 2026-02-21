@@ -144,9 +144,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const totalSeconds = Math.max(0, value);
     const hours = Math.floor(totalSeconds / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const secondsValue = totalSeconds - hours * 3600 - minutes * 60;
-    const secondsFormatted = secondsValue.toFixed(secondsValue % 1 === 0 ? 0 : 1).replace(/\.0$/, '');
-    const seconds = (secondsValue >= 10 ? secondsFormatted : `0${secondsFormatted}`);
+    const secondsValue = totalSeconds % 60;
+    const secondsFormatted = secondsValue.toFixed(1).replace(/\.0$/, '');
+    const seconds = secondsValue >= 10 ? secondsFormatted : `0${secondsFormatted}`;
     if (hours > 0) {
       return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds}`;
     }
