@@ -84,7 +84,7 @@ router.post('/trim', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: t
   }
 });
 
-const TRIMMED_FILE_PATTERN = /^trimmed-[a-zA-Z0-9-]+\.mp4$/;
+const TRIMMED_FILE_PATTERN = /^trimmed-[a-zA-Z0-9]+\.mp4$/;
 
 router.get('/download/:filename', (req: Request, res: Response): void => {
   const requested = req.params.filename;
@@ -93,7 +93,12 @@ router.get('/download/:filename', (req: Request, res: Response): void => {
     return;
   }
 
-  const filePath = path.join(__dirname, '../../uploads', requested);
+  const uploadsDir = path.resolve(__dirname, '../../uploads');
+  const filePath = path.resolve(path.join(uploadsDir, requested));
+  if (!filePath.startsWith(uploadsDir)) {
+    res.status(400).json({ error: 'Invalid file' });
+    return;
+  }
 
   if (!fs.existsSync(filePath)) {
     res.status(404).json({ error: 'File not found' });

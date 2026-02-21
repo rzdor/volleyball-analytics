@@ -111,12 +111,12 @@ document.addEventListener('DOMContentLoaded', () => {
   function displayResults(result) {
     const segments = result.segments || [];
     const totalDuration = segments.reduce((sum, seg) => sum + (seg.end - seg.start), 0);
-    segmentsSummary.textContent = `Detected ${segments.length} play segment${segments.length === 1 ? '' : 's'} covering ${formatSeconds(totalDuration)}.`;
+    segmentsSummary.textContent = `Detected ${segments.length} play segment${segments.length === 1 ? '' : 's'} covering ${formatDuration(totalDuration)}.`;
 
     segmentsList.innerHTML = segments.map((seg, idx) => {
       return `<div class="analysis-section">
         <h3>Segment ${idx + 1}</h3>
-        <p>${formatSeconds(seg.start)} → ${formatSeconds(seg.end)}</p>
+        <p>${formatDuration(seg.start)} → ${formatDuration(seg.end)}</p>
       </div>`;
     }).join('');
 
@@ -140,7 +140,7 @@ document.addEventListener('DOMContentLoaded', () => {
     results.scrollIntoView({ behavior: 'smooth' });
   }
 
-  function formatSeconds(value) {
+  function formatDuration(value) {
     const minutes = Math.floor(value / 60);
     const seconds = Math.floor(value % 60).toString().padStart(2, '0');
     return `${minutes}:${seconds}`;
