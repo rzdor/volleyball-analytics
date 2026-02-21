@@ -110,7 +110,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function displayResults(result) {
     const segments = result.segments || [];
-    const totalDuration = segments.reduce((sum, seg) => sum + (seg.end - seg.start), 0);
+    const totalDuration = segments.reduce((sum, seg) => sum + ((seg?.end ?? 0) - (seg?.start ?? 0)), 0);
     segmentsSummary.textContent = `Detected ${segments.length} play segment${segments.length === 1 ? '' : 's'} covering ${formatDuration(totalDuration)}.`;
 
     segmentsList.innerHTML = segments.map((seg, idx) => {
@@ -141,10 +141,12 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function formatDuration(value) {
-    const totalSeconds = Math.floor(value);
+    const totalSeconds = Math.max(0, value);
     const hours = Math.floor(totalSeconds / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const seconds = (totalSeconds % 60).toString().padStart(2, '0');
+    const secondsValue = totalSeconds - hours * 3600 - minutes * 60;
+    const secondsFormatted = secondsValue.toFixed(secondsValue % 1 === 0 ? 0 : 1).replace(/\.0$/, '');
+    const seconds = (secondsValue >= 10 ? secondsFormatted : `0${secondsFormatted}`);
     if (hours > 0) {
       return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds}`;
     }
