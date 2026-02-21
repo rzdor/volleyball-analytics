@@ -7,13 +7,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const uploadForm = document.getElementById('uploadForm');
   const results = document.getElementById('results');
   const loading = document.getElementById('loading');
-  const analyzeBtn = document.getElementById('analyzeBtn');
+  const trimBtn = document.getElementById('trimBtn');
   const segmentsSummary = document.getElementById('segmentsSummary');
   const segmentsList = document.getElementById('segmentsList');
   const downloadLink = document.getElementById('downloadLink');
   const processedPreview = document.getElementById('processedPreview');
 
-  analyzeBtn.disabled = true;
+  trimBtn.disabled = true;
 
   // Drag and drop handlers
   dropZone.addEventListener('click', () => videoInput.click());
@@ -52,7 +52,7 @@ document.addEventListener('DOMContentLoaded', () => {
     videoPreview.src = url;
     fileName.textContent = file.name + ' (' + formatFileSize(file.size) + ')';
     filePreview.classList.remove('hidden');
-    analyzeBtn.disabled = false;
+    trimBtn.disabled = false;
   }
 
   function formatFileSize(bytes) {
@@ -82,12 +82,10 @@ document.addEventListener('DOMContentLoaded', () => {
     results.classList.add('hidden');
 
     try {
-      const options = {
-        method: 'POST',
-        body: data
-      };
-
-      const response = await fetch(url, options);
+    const response = await fetch(url, {
+      method: 'POST',
+      body: data
+    });
       const result = await response.json();
 
       if (result.success) {
@@ -144,7 +142,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function formatSeconds(value) {
     const minutes = Math.floor(value / 60);
-    const seconds = Math.round(value % 60).toString().padStart(2, '0');
+    const seconds = Math.floor(value % 60).toString().padStart(2, '0');
     return `${minutes}:${seconds}`;
   }
 });
