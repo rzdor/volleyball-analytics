@@ -111,7 +111,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function displayResults(result) {
-    const segments = result.segments || [];
+    const segments = (result.segments || []).filter(seg => typeof seg?.start === 'number' && typeof seg?.end === 'number');
     const totalDuration = segments.reduce((sum, seg) => sum + (seg.end - seg.start), 0);
     segmentsSummary.textContent = `Detected ${segments.length} play segment${segments.length === 1 ? '' : 's'} covering ${formatSeconds(totalDuration)}.`;
 
@@ -122,7 +122,7 @@ document.addEventListener('DOMContentLoaded', () => {
       </div>`;
     }).join('');
 
-    const previewUrl = result.previewUrl || result.downloadUrl;
+    const videoUrl = result.previewUrl || result.downloadUrl;
     if (result.downloadUrl) {
       downloadLink.href = result.downloadUrl;
       downloadLink.classList.remove('hidden');
@@ -131,8 +131,8 @@ document.addEventListener('DOMContentLoaded', () => {
       downloadLink.classList.add('hidden');
     }
 
-    if (previewUrl) {
-      processedPreview.src = previewUrl;
+    if (videoUrl) {
+      processedPreview.src = videoUrl;
       processedPreview.classList.remove('hidden');
     } else {
       processedPreview.classList.add('hidden');

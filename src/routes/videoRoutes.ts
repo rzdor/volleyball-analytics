@@ -84,9 +84,11 @@ router.post('/trim', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: t
   }
 });
 
+const TRIMMED_FILE_PATTERN = /^trimmed-[a-zA-Z0-9-]+\.mp4$/;
+
 router.get('/download/:filename', (req: Request, res: Response): void => {
   const safeName = path.basename(req.params.filename);
-  if (!safeName.startsWith('trimmed-')) {
+  if (safeName !== req.params.filename || !TRIMMED_FILE_PATTERN.test(safeName)) {
     res.status(400).json({ error: 'Invalid file' });
     return;
   }
