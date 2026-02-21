@@ -84,7 +84,7 @@ router.post('/trim', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: t
   }
 });
 
-const TRIMMED_FILE_PATTERN = /^trimmed-[a-zA-Z0-9]+\.mp4$/;
+const TRIMMED_FILE_PATTERN = /^trimmed-[a-f0-9-]+\.mp4$/;
 
 router.get('/download/:filename', (req: Request, res: Response): void => {
   const requested = req.params.filename;

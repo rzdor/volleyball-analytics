@@ -141,8 +141,13 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function formatDuration(value) {
-    const minutes = Math.floor(value / 60);
-    const seconds = Math.floor(value % 60).toString().padStart(2, '0');
+    const totalSeconds = Math.max(0, Math.floor(value));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = (totalSeconds % 60).toString().padStart(2, '0');
+    if (hours > 0) {
+      return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds}`;
+    }
     return `${minutes}:${seconds}`;
   }
 });
