@@ -94,7 +94,7 @@ router.get('/download/:filename', (req: Request, res: Response): void => {
   }
 
   const uploadsDir = path.resolve(__dirname, '../../uploads');
-  const filePath = path.resolve(path.join(uploadsDir, requested));
+  const filePath = path.resolve(uploadsDir, requested);
   if (!filePath.startsWith(uploadsDir)) {
     res.status(400).json({ error: 'Invalid file' });
     return;
