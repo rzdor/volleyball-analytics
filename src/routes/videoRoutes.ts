@@ -89,10 +89,6 @@ const downloadLimiter = rateLimit({ windowMs: 60_000, limit: 30, standardHeaders
 
 router.get('/download/:filename', downloadLimiter, (req: Request, res: Response): void => {
   const requested = req.params.filename as string;
-  if (!requested) {
-    res.status(400).json({ error: 'Invalid file' });
-    return;
-  }
   if (!TRIMMED_FILE_PATTERN.test(requested)) {
     res.status(400).json({ error: 'Invalid file' });
     return;
