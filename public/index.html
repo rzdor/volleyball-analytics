@@ -9,8 +9,8 @@
 <body>
   <div class="container">
     <header>
-      <h1>🏐 Volleyball Play Analyzer</h1>
-      <p>Upload video to get AI-powered coaching suggestions</p>
+      <h1>🏐 Volleyball Play Trimmer</h1>
+      <p>Upload a match clip to automatically remove downtime and keep only plays</p>
     </header>
 
     <main>
@@ -29,79 +29,29 @@
             <video id="videoPreview" controls></video>
             <p id="fileName"></p>
           </div>
-          
-          <div class="options-grid">
-            <div class="form-group">
-              <label for="framesPerSecond">Frames per Second</label>
-              <input type="number" id="framesPerSecond" name="framesPerSecond" value="1" min="0.1" max="5" step="0.1">
-              <p class="hint">Higher = more detail, higher cost (0.1-5 fps)</p>
-            </div>
-            <div class="form-group">
-              <label for="maxFrames">Max Frames to Analyze</label>
-              <input type="number" id="maxFrames" name="maxFrames" value="15" min="1" max="50">
-              <p class="hint">Limit frames to control cost (1-50 frames)</p>
-            </div>
-          </div>
-          
-          <div id="costEstimate" class="cost-estimate">
-            <span>💰 Estimated cost: </span><strong id="estimatedCost">~$0.04</strong>
-          </div>
-          
-          <div class="form-group">
-            <label for="description">Play Description (optional)</label>
-            <textarea id="description" name="description" placeholder="Describe the play context, e.g., 'Outside hitter approach from position 4, setter running a quick set...'"></textarea>
-          </div>
-          <button type="submit" id="analyzeBtn" class="btn-primary">Analyze Play</button>
-        </form>
-      </div>
-
-      <div class="divider">
-        <span>OR</span>
-      </div>
-
-      <div class="url-section">
-        <h2>Analyze from URL</h2>
-        <form id="urlForm">
-          <div class="form-group">
-            <label for="videoUrl">Video URL</label>
-            <input type="url" id="videoUrl" name="videoUrl" placeholder="https://storage.example.com/game-clip.mp4">
-            <p class="hint">Direct link to a publicly accessible video file (MP4, WebM, MOV, AVI) — e.g. Google Drive, Dropbox (max 100 MB)</p>
-          </div>
-
-          <div class="options-grid">
-            <div class="form-group">
-              <label for="urlFramesPerSecond">Frames per Second</label>
-              <input type="number" id="urlFramesPerSecond" name="urlFramesPerSecond" value="1" min="0.1" max="5" step="0.1">
-              <p class="hint">Higher = more detail, higher cost (0.1–5 fps)</p>
-            </div>
-            <div class="form-group">
-              <label for="urlMaxFrames">Max Frames to Analyze</label>
-              <input type="number" id="urlMaxFrames" name="urlMaxFrames" value="15" min="1" max="50">
-              <p class="hint">Limit frames to control cost (1–50 frames)</p>
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label for="urlDescription">Play Description (optional)</label>
-            <textarea id="urlDescription" name="urlDescription" placeholder="Describe the play context…"></textarea>
-          </div>
-          <button type="submit" class="btn-primary">Analyze from URL</button>
+          <p class="hint">We will detect motion and trim out rotations, timeouts, and other downtime automatically.</p>
+          <button type="submit" id="trimBtn" class="btn-primary">Remove Non-Play Time</button>
         </form>
       </div>
 
       <div id="results" class="results hidden">
-        <h2>📋 Analysis Results</h2>
-        <div id="analysisContent"></div>
+        <h2>🎞️ Processed Video</h2>
+        <p id="segmentsSummary"></p>
+        <div id="segmentsList"></div>
+        <div class="actions">
+          <a id="downloadLink" class="btn-primary" href="#" download aria-label="Download trimmed video file">Download Processed File</a>
+        </div>
+        <video id="processedPreview" controls class="processed-video hidden"></video>
       </div>
 
       <div id="loading" class="loading hidden">
         <div class="spinner"></div>
-        <p>Analyzing your play...</p>
+        <p>Processing your video...</p>
       </div>
     </main>
 
     <footer>
-      <p>Powered by AI • Built for volleyball coaches and players</p>
+      <p>Built to speed up volleyball video review</p>
     </footer>
   </div>
 
