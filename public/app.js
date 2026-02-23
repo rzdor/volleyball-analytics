@@ -8,12 +8,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const results = document.getElementById('results');
   const loading = document.getElementById('loading');
   const trimBtn = document.getElementById('trimBtn');
+  const videoUrlInput = document.getElementById('videoUrl');
   const segmentsSummary = document.getElementById('segmentsSummary');
   const segmentsList = document.getElementById('segmentsList');
   const downloadLink = document.getElementById('downloadLink');
   const processedPreview = document.getElementById('processedPreview');
 
-  trimBtn.disabled = true;
+  updateSubmitState();
 
   // Drag and drop handlers
   dropZone.addEventListener('click', () => videoInput.click());
@@ -42,17 +43,28 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
+  videoUrlInput.addEventListener('input', () => {
+    if (videoUrlInput.value.trim()) {
+      videoInput.value = '';
+      filePreview.classList.add('hidden');
+      videoPreview.removeAttribute('src');
+      fileName.textContent = '';
+    }
+    updateSubmitState();
+  });
+
   function handleFile(file) {
     if (!file.type.startsWith('video/')) {
       alert('Please select a video file');
       return;
     }
 
+    videoUrlInput.value = '';
     const url = URL.createObjectURL(file);
     videoPreview.src = url;
     fileName.textContent = file.name + ' (' + formatFileSize(file.size) + ')';
     filePreview.classList.remove('hidden');
-    trimBtn.disabled = false;
+    updateSubmitState();
   }
 
   function formatFileSize(bytes) {
@@ -61,18 +73,46 @@ document.addEventListener('DOMContentLoaded', () => {
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   }
 
+  function isValidUrl(value) {
+    if (!value) return false;
+    try {
+      const parsed = new URL(value);
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    } catch {
+      return false;
+    }
+  }
+
+  function updateSubmitState() {
+    const hasFile = videoInput.files && videoInput.files.length > 0;
+    const urlProvided = isValidUrl(videoUrlInput.value.trim());
+    trimBtn.disabled = !(hasFile || urlProvided);
+  }
+
   // Upload form submission
   uploadForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     
     const file = videoInput.files[0];
-    if (!file) {
-      alert('Please select a video file');
+    const videoUrl = videoUrlInput.value.trim();
+
+    if (!file && !videoUrl) {
+      alert('Please select a video file or paste a public link');
+      return;
+    }
+
+    if (videoUrl && !isValidUrl(videoUrl)) {
+      alert('Please enter a valid HTTP(S) link that anyone with the URL can access');
       return;
     }
 
     const formData = new FormData();
-    formData.append('video', file);
+    if (file) {
+      formData.append('video', file);
+    }
+    if (videoUrl) {
+      formData.append('videoUrl', videoUrl);
+    }
 
     await processVideo('/api/videos/trim', formData);
   });

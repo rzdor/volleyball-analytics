@@ -6,12 +6,21 @@ import { randomUUID } from 'crypto';
 import rateLimit from 'express-rate-limit';
 import { detectMotionSegments, MotionDetectorOptions } from '../services/motionDetector';
 import { trimVideoToSegments } from '../services/videoTrimmer';
+import {
+  ALLOWED_VIDEO_MIME_TYPES,
+  MAX_REMOTE_VIDEO_BYTES,
+  VideoDownloadError,
+  downloadVideoFromUrl,
+} from '../services/remoteVideoDownloader';
 
 const router = Router();
 
+const uploadsDir = path.join(__dirname, '../../uploads');
+const MAX_FILE_SIZE_BYTES = MAX_REMOTE_VIDEO_BYTES;
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, path.join(__dirname, '../../uploads'));
+    cb(null, uploadsDir);
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
@@ -20,8 +29,7 @@ const storage = multer.diskStorage({
 });
 
 const fileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
-  const allowedTypes = ['video/mp4', 'video/webm', 'video/quicktime', 'video/x-msvideo'];
-  if (allowedTypes.includes(file.mimetype)) {
+  if (ALLOWED_VIDEO_MIME_TYPES.includes(file.mimetype as typeof ALLOWED_VIDEO_MIME_TYPES[number])) {
     cb(null, true);
   } else {
     cb(new Error('Invalid file type. Only video files are allowed.'));
@@ -31,16 +39,24 @@ const fileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilt
 const upload = multer({
   storage,
   fileFilter,
-  limits: { fileSize: 100 * 1024 * 1024 } // 100MB limit
+  limits: { fileSize: MAX_FILE_SIZE_BYTES } // 100MB limit
 });
 
 router.post('/trim', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: true, legacyHeaders: false }), upload.single('video'), async (req: Request, res: Response): Promise<void> => {
-  const videoPath = req.file?.path;
   let outputPath: string | undefined;
+  let inputVideoPath: string | undefined = req.file?.path;
+  let downloadedPath: string | undefined;
 
   try {
-    if (!req.file || !videoPath) {
-      res.status(400).json({ error: 'No video file uploaded' });
+    const videoUrl = typeof req.body.videoUrl === 'string' ? req.body.videoUrl.trim() : '';
+
+    if (!inputVideoPath && videoUrl) {
+      downloadedPath = await downloadVideoFromUrl(videoUrl, uploadsDir, MAX_FILE_SIZE_BYTES);
+      inputVideoPath = downloadedPath;
+    }
+
+    if (!inputVideoPath) {
+      res.status(400).json({ error: 'No video provided. Upload a file or provide a public link.' });
       return;
     }
 
@@ -53,7 +69,7 @@ router.post('/trim', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: t
       smoothingWindow: parseInt(req.body.smoothingWindow, 10) || 3,
     };
 
-    const segments = await detectMotionSegments(videoPath, options);
+    const segments = await detectMotionSegments(inputVideoPath, options);
 
     if (segments.length === 0) {
       res.status(422).json({
@@ -64,9 +80,9 @@ router.post('/trim', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: t
     }
 
     const outputFilename = `trimmed-${randomUUID()}.mp4`;
-    outputPath = path.join(__dirname, '../../uploads', outputFilename);
+    outputPath = path.join(uploadsDir, outputFilename);
 
-    await trimVideoToSegments(videoPath, segments, outputPath);
+    await trimVideoToSegments(inputVideoPath, segments, outputPath);
 
     res.json({
       success: true,
@@ -79,6 +95,13 @@ router.post('/trim', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: t
     console.error('Trim error:', error);
     if (outputPath && fs.existsSync(outputPath)) {
       try { fs.unlinkSync(outputPath); } catch { /* ignore */ }
+    }
+    if (downloadedPath && fs.existsSync(downloadedPath)) {
+      try { fs.unlinkSync(downloadedPath); } catch { /* ignore */ }
+    }
+    if (error instanceof VideoDownloadError) {
+      res.status(error.statusCode).json({ error: error.message });
+      return;
     }
     res.status(500).json({ error: 'Failed to trim video' });
   }
@@ -98,9 +121,9 @@ router.get('/download/:filename', downloadLimiter, (req: Request, res: Response)
     return;
   }
 
-  const uploadsDir = path.resolve(__dirname, '../../uploads');
-  const filePath = path.resolve(uploadsDir, requested);
-  if (!filePath.startsWith(uploadsDir)) {
+  const uploadsRoot = path.resolve(uploadsDir);
+  const filePath = path.resolve(uploadsRoot, requested);
+  if (!filePath.startsWith(uploadsRoot)) {
     res.status(400).json({ error: 'Invalid file' });
     return;
   }
