@@ -85,10 +85,6 @@ router.post('/trim', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: t
       res.status(error.statusCode).json({ error: error.message });
       return;
     }
-    if (error instanceof Error && error.message.includes('No video provided')) {
-      res.status(400).json({ error: error.message });
-      return;
-    }
     res.status(500).json({ error: 'Failed to trim video' });
   }
 });
