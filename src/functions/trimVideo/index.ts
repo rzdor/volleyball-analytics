@@ -61,7 +61,7 @@ export default async function (context: FunctionContext, req: HttpRequest): Prom
       return;
     }
     if (error instanceof VideoDownloadError) {
-      const statusCode = error.statusCode ?? 400;
+      const statusCode = typeof error.statusCode === 'number' ? error.statusCode : 502;
       context.res = { status: statusCode, body: { error: error.message } };
       return;
     }
