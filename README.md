@@ -175,7 +175,8 @@ No AI or third-party services are required — only ffmpeg.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `video` | File | **required** | Video file (MP4, WebM, MOV, AVI) |
+| `video` | File | **optional** | Video file (MP4, WebM, MOV, AVI) |
+| `videoUrl` | string | — | Direct public HTTP(S) link to a video file (alternative to uploading) |
 | `sampleFps` | number | `2` | Frames to sample per second for motion analysis |
 | `threshold` | number | `0.02` | Motion score threshold (0–1); lower = more sensitive |
 | `minSegmentLength` | number | `3` | Minimum play-segment length in seconds |
@@ -212,6 +213,13 @@ curl -X POST http://localhost:3000/api/videos/trim \
   -F "threshold=0.015" \
   -F "preRoll=2" \
   -F "postRoll=2"
+```
+
+Or provide a direct public link instead of uploading:
+
+```bash
+curl -X POST http://localhost:3000/api/videos/trim \
+  -F "videoUrl=https://storage.example.com/game.mp4"
 ```
 
 Download the result:

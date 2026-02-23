@@ -29,6 +29,12 @@
             <video id="videoPreview" controls></video>
             <p id="fileName"></p>
           </div>
+          <div class="divider"><span>or</span></div>
+          <div class="form-group">
+            <label for="videoUrl">Paste a public link</label>
+            <input class="text-input" type="url" id="videoUrl" name="videoUrl" placeholder="https://storage.example.com/match.mp4" inputmode="url">
+            <p class="hint">Use a direct link to your cloud video (publicly accessible, max 100MB).</p>
+          </div>
           <p class="hint">We will detect motion and trim out rotations, timeouts, and other downtime automatically.</p>
           <button type="submit" id="trimBtn" class="btn-primary">Remove Non-Play Time</button>
         </form>
