@@ -151,6 +151,15 @@ export class VideoStorage {
       await this.containerReady;
       const blobName = `${this.getPrefix(kind)}/${filename}`;
       const blobClient = this.containerClient.getBlockBlobClient(blobName);
+      console.log(
+        '[storage] Uploading to Azure Blob Storage',
+        {
+          container: this.containerClient.containerName,
+          blobName,
+          localPath,
+          blobUrl: blobClient.url,
+        }
+      );
 
       await blobClient.uploadFile(localPath, {
         blobHTTPHeaders: {
