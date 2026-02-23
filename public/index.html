@@ -50,6 +50,27 @@
         <video id="processedPreview" controls class="processed-video hidden"></video>
       </div>
 
+      <div class="library" id="library">
+        <div class="library-header">
+          <h2>📂 Video Library</h2>
+          <button type="button" id="refreshLibrary" class="btn-secondary">Refresh</button>
+        </div>
+        <div class="library-grid">
+          <div>
+            <h3>Uploaded videos</h3>
+            <ul id="uploadedList" class="video-list">
+              <li class="muted">No uploads yet.</li>
+            </ul>
+          </div>
+          <div>
+            <h3>Processed videos</h3>
+            <ul id="processedList" class="video-list">
+              <li class="muted">No processed videos yet.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
       <div id="loading" class="loading hidden">
         <div class="spinner"></div>
         <p>Processing your video...</p>

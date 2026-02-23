@@ -50,6 +50,17 @@ AI-powered web application for analyzing volleyball plays using video frame extr
 
 5. Open http://localhost:3000 in your browser
 
+### Azure Blob Storage
+
+To persist uploaded and processed videos in Azure Blob Storage, set the following environment variables in `.env`:
+
+- `AZURE_STORAGE_CONNECTION_STRING`
+- `AZURE_STORAGE_CONTAINER` (defaults to `volleyball-videos`)
+- `AZURE_STORAGE_INPUT_FOLDER` (defaults to `inputs`)
+- `AZURE_STORAGE_OUTPUT_FOLDER` (defaults to `processed`)
+
+When unset, the app falls back to local disk storage under `uploads/`.
+
 ## Configuration Options
 
 | Option | Default | Range | Description |

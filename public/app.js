@@ -13,8 +13,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const segmentsList = document.getElementById('segmentsList');
   const downloadLink = document.getElementById('downloadLink');
   const processedPreview = document.getElementById('processedPreview');
+  const uploadedList = document.getElementById('uploadedList');
+  const processedList = document.getElementById('processedList');
+  const refreshLibraryBtn = document.getElementById('refreshLibrary');
 
   updateSubmitState();
+  fetchExistingVideos();
 
   // Drag and drop handlers
   dropZone.addEventListener('click', () => videoInput.click());
@@ -117,6 +121,10 @@ document.addEventListener('DOMContentLoaded', () => {
     await processVideo('/api/videos/trim', formData);
   });
 
+  refreshLibraryBtn?.addEventListener('click', () => {
+    fetchExistingVideos();
+  });
+
   async function processVideo(url, data) {
     showLoading(true);
     results.classList.add('hidden');
@@ -130,6 +138,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (result.success) {
         displayResults(result);
+        fetchExistingVideos();
       } else {
         throw new Error(result.error || 'Processing failed');
       }
@@ -178,6 +187,81 @@ document.addEventListener('DOMContentLoaded', () => {
 
     results.classList.remove('hidden');
     results.scrollIntoView({ behavior: 'smooth' });
+  }
+
+  async function fetchExistingVideos() {
+    if (!uploadedList || !processedList) return;
+    try {
+      const response = await fetch('/api/videos/list');
+      if (!response.ok) {
+        throw new Error('Failed to load existing videos');
+      }
+      const payload = await response.json();
+      renderList(uploadedList, payload.uploads || [], 'No uploads yet.');
+      renderList(processedList, payload.processed || [], 'No processed videos yet.');
+    } catch (error) {
+      console.error('Unable to fetch videos', error);
+      renderList(uploadedList, [], 'Unable to load uploads.');
+      renderList(processedList, [], 'Unable to load processed videos.');
+    }
+  }
+
+  function renderList(listEl, items, emptyText) {
+    listEl.innerHTML = '';
+    if (!items || items.length === 0) {
+      const li = document.createElement('li');
+      li.className = 'muted';
+      li.textContent = emptyText;
+      listEl.appendChild(li);
+      return;
+    }
+
+    items.forEach(item => {
+      const li = document.createElement('li');
+      const primaryUrl = item.url || item.downloadUrl;
+      if (primaryUrl) {
+        const link = document.createElement('a');
+        link.href = primaryUrl;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = item.name || 'video';
+        li.appendChild(link);
+      } else {
+        li.textContent = item.name || 'video';
+      }
+
+      if (item.downloadUrl && item.downloadUrl !== primaryUrl) {
+        const download = document.createElement('a');
+        download.href = item.downloadUrl;
+        download.target = '_blank';
+        download.rel = 'noopener noreferrer';
+        download.textContent = 'Download';
+        download.className = 'video-download-link';
+        download.style.marginLeft = '0.5rem';
+        li.appendChild(download);
+      }
+
+      const metaParts = [];
+      if (typeof item.size === 'number') {
+        metaParts.push(formatFileSize(item.size));
+      }
+      if (item.lastModified) {
+        try {
+          const date = new Date(item.lastModified);
+          metaParts.push(date.toLocaleString());
+        } catch {
+          /* ignore date parse errors */
+        }
+      }
+      if (metaParts.length > 0) {
+        const meta = document.createElement('span');
+        meta.className = 'video-meta';
+        meta.textContent = metaParts.join(' • ');
+        li.appendChild(meta);
+      }
+
+      listEl.appendChild(li);
+    });
   }
 
   function formatDuration(value) {
