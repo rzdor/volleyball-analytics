@@ -11,7 +11,7 @@ import {
   VideoDownloadError,
 } from '../services/remoteVideoDownloader';
 import { videoStorage } from '../services/storageProvider';
-import { NoSegmentsDetectedError, runTrimPipeline } from '../services/trimPipeline';
+import { NoSegmentsDetectedError, normalizeVideoUrl, runTrimPipeline } from '../services/trimPipeline';
 
 const router = Router();
 
@@ -45,7 +45,7 @@ const upload = multer({
 
 router.post('/trim', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: true, legacyHeaders: false }), upload.single('video'), async (req: Request, res: Response): Promise<void> => {
   try {
-    const videoUrl = typeof req.body.videoUrl === 'string' ? req.body.videoUrl.trim() : '';
+    const videoUrl = normalizeVideoUrl(req.body.videoUrl);
 
     const options: MotionDetectorOptions = {
       sampleFps: parseFloat(req.body.sampleFps) || 2,

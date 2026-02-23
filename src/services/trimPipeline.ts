@@ -6,6 +6,10 @@ import { trimVideoToSegments } from './videoTrimmer';
 import { StoredVideo, VideoStorage, videoStorage } from './storageProvider';
 import { MAX_REMOTE_VIDEO_BYTES, VideoDownloadError, downloadVideoFromUrl } from './remoteVideoDownloader';
 
+export function normalizeVideoUrl(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
 export class NoSegmentsDetectedError extends Error {
   constructor() {
     super('No motion segments detected');
@@ -63,10 +67,18 @@ export async function runTrimPipeline(params: TrimPipelineParams): Promise<TrimP
     return { segments, storedOutput, storedInput, outputPath, downloadedPath };
   } catch (err) {
     if (outputPath && fs.existsSync(outputPath)) {
-      try { fs.unlinkSync(outputPath); } catch (cleanupErr) { console.error(`Failed to clean up output file: ${outputPath}`, cleanupErr); }
+      try {
+        fs.unlinkSync(outputPath);
+      } catch (cleanupErr) {
+        console.error(`Failed to clean up output file: ${outputPath}`, cleanupErr);
+      }
     }
     if (downloadedPath && fs.existsSync(downloadedPath)) {
-      try { fs.unlinkSync(downloadedPath); } catch (cleanupErr) { console.error(`Failed to clean up downloaded file: ${downloadedPath}`, cleanupErr); }
+      try {
+        fs.unlinkSync(downloadedPath);
+      } catch (cleanupErr) {
+        console.error(`Failed to clean up downloaded file: ${downloadedPath}`, cleanupErr);
+      }
     }
     throw err;
   }

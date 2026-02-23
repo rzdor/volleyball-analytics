@@ -3,7 +3,7 @@ import path from 'path';
 import { MotionDetectorOptions } from '../../services/motionDetector';
 import { MAX_REMOTE_VIDEO_BYTES, VideoDownloadError } from '../../services/remoteVideoDownloader';
 import { createVideoStorage } from '../../services/storageProvider';
-import { NoSegmentsDetectedError, runTrimPipeline } from '../../services/trimPipeline';
+import { NoSegmentsDetectedError, normalizeVideoUrl, runTrimPipeline } from '../../services/trimPipeline';
 
 type TrimVideoRequest = { body?: any; query?: Record<string, unknown> };
 type TrimVideoContext = { res?: any; log?: (...args: any[]) => void };
@@ -11,12 +11,7 @@ type TrimVideoContext = { res?: any; log?: (...args: any[]) => void };
 const storage = createVideoStorage({ baseDir: path.join(os.tmpdir(), 'va-function-uploads') });
 
 export default async function (context: TrimVideoContext, req: TrimVideoRequest): Promise<void> {
-  const blobUrl =
-    typeof req.body?.blobUrl === 'string'
-      ? req.body.blobUrl.trim()
-      : typeof req.query?.blobUrl === 'string'
-        ? req.query.blobUrl.trim()
-        : '';
+  const blobUrl = normalizeVideoUrl(req.body?.blobUrl ?? req.query?.blobUrl);
 
   if (!blobUrl) {
     context.res = { status: 400, body: { error: 'blobUrl is required' } };
