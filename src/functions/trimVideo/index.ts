@@ -53,7 +53,7 @@ export default async function (context: any, req: any): Promise<void> {
     if (error instanceof NoSegmentsDetectedError) {
       context.res = {
         status: 422,
-        body: { error: 'No motion segments detected. Try lowering the threshold.', segments: error.segments },
+        body: { error: 'No motion segments detected. Try lowering the threshold.', segments: [] },
       };
       return;
     }

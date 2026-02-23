@@ -77,7 +77,7 @@ router.post('/trim', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: t
     if (error instanceof NoSegmentsDetectedError) {
       res.status(422).json({
         error: 'No motion segments detected. Try lowering the threshold.',
-        segments: error.segments,
+        segments: [],
       });
       return;
     }

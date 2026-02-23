@@ -7,11 +7,8 @@ import { StoredVideo, VideoStorage, videoStorage } from './storageProvider';
 import { MAX_REMOTE_VIDEO_BYTES, VideoDownloadError, downloadVideoFromUrl } from './remoteVideoDownloader';
 
 export class NoSegmentsDetectedError extends Error {
-  segments: TimeRange[];
-
-  constructor(segments: TimeRange[]) {
+  constructor() {
     super('No motion segments detected');
-    this.segments = segments;
   }
 }
 
@@ -55,7 +52,7 @@ export async function runTrimPipeline(params: TrimPipelineParams): Promise<TrimP
     const segments = await detectMotionSegments(inputPath, motionOptions);
 
     if (segments.length === 0) {
-      throw new NoSegmentsDetectedError(segments);
+      throw new NoSegmentsDetectedError();
     }
 
     const filename = params.outputFilename ?? `trimmed-${randomUUID()}.mp4`;
