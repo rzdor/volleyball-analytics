@@ -4,15 +4,14 @@ import path from 'path';
 import fs from 'fs';
 import { randomUUID } from 'crypto';
 import rateLimit from 'express-rate-limit';
-import { detectMotionSegments, MotionDetectorOptions } from '../services/motionDetector';
-import { trimVideoToSegments } from '../services/videoTrimmer';
+import { MotionDetectorOptions } from '../services/motionDetector';
 import {
   ALLOWED_VIDEO_MIME_TYPES,
   MAX_REMOTE_VIDEO_BYTES,
   VideoDownloadError,
-  downloadVideoFromUrl,
 } from '../services/remoteVideoDownloader';
 import { videoStorage } from '../services/storageProvider';
+import { NoSegmentsDetectedError, runTrimPipeline } from '../services/trimPipeline';
 
 const router = Router();
 
@@ -45,25 +44,8 @@ const upload = multer({
 });
 
 router.post('/trim', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: true, legacyHeaders: false }), upload.single('video'), async (req: Request, res: Response): Promise<void> => {
-  let outputPath: string | undefined;
-  let inputVideoPath: string | undefined = req.file?.path;
-  let downloadedPath: string | undefined;
-  let storedInput: { url?: string } | undefined;
-
   try {
     const videoUrl = typeof req.body.videoUrl === 'string' ? req.body.videoUrl.trim() : '';
-
-    if (!inputVideoPath && videoUrl) {
-       downloadedPath = await downloadVideoFromUrl(videoUrl, uploadsInputDir, MAX_FILE_SIZE_BYTES);
-       inputVideoPath = downloadedPath;
-    }
-
-    if (!inputVideoPath) {
-      res.status(400).json({ error: 'No video provided. Upload a file or provide a public link.' });
-      return;
-    }
-
-    storedInput = await videoStorage.saveInput(inputVideoPath, path.basename(inputVideoPath));
 
     const options: MotionDetectorOptions = {
       sampleFps: parseFloat(req.body.sampleFps) || 2,
@@ -74,41 +56,37 @@ router.post('/trim', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: t
       smoothingWindow: parseInt(req.body.smoothingWindow, 10) || 3,
     };
 
-    const segments = await detectMotionSegments(inputVideoPath, options);
-
-    if (segments.length === 0) {
-      res.status(422).json({
-        error: 'No motion segments detected. Try lowering the threshold.',
-        segments,
-      });
-      return;
-    }
-
-    const outputFilename = `trimmed-${randomUUID()}.mp4`;
-    outputPath = path.join(uploadsOutputDir, outputFilename);
-
-    await trimVideoToSegments(inputVideoPath, segments, outputPath);
-
-    const storedOutput = await videoStorage.saveOutput(outputPath, outputFilename);
+    const result = await runTrimPipeline({
+      videoPath: req.file?.path,
+      videoUrl,
+      storage: videoStorage,
+      motionOptions: options,
+      maxBytes: MAX_FILE_SIZE_BYTES,
+    });
 
     res.json({
       success: true,
-      segments,
-      totalSegments: segments.length,
-      previewUrl: storedOutput.url,
-      downloadUrl: storedOutput.downloadUrl || storedOutput.url,
-      inputUrl: storedInput?.url,
+      segments: result.segments,
+      totalSegments: result.segments.length,
+      previewUrl: result.storedOutput.url,
+      downloadUrl: result.storedOutput.downloadUrl || result.storedOutput.url,
+      inputUrl: result.storedInput?.url,
     });
   } catch (error) {
     console.error('Trim error:', error);
-    if (outputPath && fs.existsSync(outputPath)) {
-      try { fs.unlinkSync(outputPath); } catch { /* ignore */ }
-    }
-    if (downloadedPath && fs.existsSync(downloadedPath)) {
-      try { fs.unlinkSync(downloadedPath); } catch { /* ignore */ }
+    if (error instanceof NoSegmentsDetectedError) {
+      res.status(422).json({
+        error: 'No motion segments detected. Try lowering the threshold.',
+        segments: error.segments,
+      });
+      return;
     }
     if (error instanceof VideoDownloadError) {
       res.status(error.statusCode).json({ error: error.message });
+      return;
+    }
+    if (error instanceof Error && error.message.includes('No video provided')) {
+      res.status(400).json({ error: error.message });
       return;
     }
     res.status(500).json({ error: 'Failed to trim video' });
