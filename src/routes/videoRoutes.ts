@@ -15,7 +15,10 @@ import {
 
 const router = Router();
 
-const uploadsDir = path.join(__dirname, '../../uploads');
+const uploadsDir = path.resolve(process.env.UPLOADS_DIR ?? path.join(process.cwd(), 'uploads'));
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
 const MAX_FILE_SIZE_BYTES = MAX_REMOTE_VIDEO_BYTES;
 
 const storage = multer.diskStorage({
