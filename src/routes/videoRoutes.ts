@@ -12,13 +12,11 @@ import {
   VideoDownloadError,
   downloadVideoFromUrl,
 } from '../services/remoteVideoDownloader';
+import { resolveUploadsDir } from '../utils/uploads';
 
 const router = Router();
 
-const uploadsDir = path.resolve(process.env.UPLOADS_DIR ?? path.join(process.cwd(), 'uploads'));
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
+const uploadsDir = resolveUploadsDir();
 const MAX_FILE_SIZE_BYTES = MAX_REMOTE_VIDEO_BYTES;
 
 const storage = multer.diskStorage({
