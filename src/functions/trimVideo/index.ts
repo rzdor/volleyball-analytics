@@ -56,7 +56,7 @@ export default async function (context: TrimVideoContext, req: TrimVideoRequest)
       return;
     }
     if (error instanceof VideoDownloadError) {
-      const statusCode = typeof error.statusCode === 'number' ? error.statusCode : 502;
+      const statusCode = typeof error.statusCode === 'number' ? error.statusCode : 500;
       context.res = { status: statusCode, body: { error: error.message } };
       return;
     }
