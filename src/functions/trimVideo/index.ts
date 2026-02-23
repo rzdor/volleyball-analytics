@@ -61,7 +61,8 @@ export default async function (context: FunctionContext, req: HttpRequest): Prom
       return;
     }
     if (error instanceof VideoDownloadError) {
-      context.res = { status: error.statusCode ?? 400, body: { error: error.message } };
+      const statusCode = error.statusCode ?? 400;
+      context.res = { status: statusCode, body: { error: error.message } };
       return;
     }
     context.log?.('trimVideo function error', error);

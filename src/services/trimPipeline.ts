@@ -43,7 +43,7 @@ export async function runTrimPipeline(params: TrimPipelineParams): Promise<TrimP
       inputPath = await downloadVideoFromUrl(params.videoUrl, storage.getLocalInputDir(), maxBytesLimit);
       downloadedPath = inputPath;
     } else {
-      throw new VideoDownloadError('No video provided. Upload a file or provide a public link.');
+      throw new VideoDownloadError('No video source provided. Supply a file path or a direct video URL.');
     }
   }
 
