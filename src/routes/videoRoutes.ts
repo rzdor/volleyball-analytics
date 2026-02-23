@@ -12,18 +12,20 @@ import {
   VideoDownloadError,
   downloadVideoFromUrl,
 } from '../services/remoteVideoDownloader';
+import { videoStorage } from '../services/storageProvider';
 
 const router = Router();
 
-const uploadsDir = path.join(__dirname, '../../uploads');
+const uploadsInputDir = videoStorage.getLocalInputDir();
+const uploadsOutputDir = videoStorage.getLocalOutputDir();
 const MAX_FILE_SIZE_BYTES = MAX_REMOTE_VIDEO_BYTES;
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, uploadsDir);
+    cb(null, uploadsInputDir);
   },
   filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    const uniqueSuffix = randomUUID();
     cb(null, uniqueSuffix + path.extname(file.originalname));
   }
 });
@@ -46,19 +48,22 @@ router.post('/trim', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: t
   let outputPath: string | undefined;
   let inputVideoPath: string | undefined = req.file?.path;
   let downloadedPath: string | undefined;
+  let storedInput: { url?: string } | undefined;
 
   try {
     const videoUrl = typeof req.body.videoUrl === 'string' ? req.body.videoUrl.trim() : '';
 
     if (!inputVideoPath && videoUrl) {
-      downloadedPath = await downloadVideoFromUrl(videoUrl, uploadsDir, MAX_FILE_SIZE_BYTES);
-      inputVideoPath = downloadedPath;
+       downloadedPath = await downloadVideoFromUrl(videoUrl, uploadsInputDir, MAX_FILE_SIZE_BYTES);
+       inputVideoPath = downloadedPath;
     }
 
     if (!inputVideoPath) {
       res.status(400).json({ error: 'No video provided. Upload a file or provide a public link.' });
       return;
     }
+
+    storedInput = await videoStorage.saveInput(inputVideoPath, path.basename(inputVideoPath));
 
     const options: MotionDetectorOptions = {
       sampleFps: parseFloat(req.body.sampleFps) || 2,
@@ -80,16 +85,19 @@ router.post('/trim', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: t
     }
 
     const outputFilename = `trimmed-${randomUUID()}.mp4`;
-    outputPath = path.join(uploadsDir, outputFilename);
+    outputPath = path.join(uploadsOutputDir, outputFilename);
 
     await trimVideoToSegments(inputVideoPath, segments, outputPath);
+
+    const storedOutput = await videoStorage.saveOutput(outputPath, outputFilename);
 
     res.json({
       success: true,
       segments,
       totalSegments: segments.length,
-      previewUrl: `/uploads/${outputFilename}`,
-      downloadUrl: `/api/videos/download/${outputFilename}`,
+      previewUrl: storedOutput.url,
+      downloadUrl: storedOutput.downloadUrl || storedOutput.url,
+      inputUrl: storedInput?.url,
     });
   } catch (error) {
     console.error('Trim error:', error);
@@ -110,7 +118,7 @@ router.post('/trim', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: t
 const TRIMMED_FILE_PATTERN = /^trimmed-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\.mp4$/i;
 const downloadLimiter = rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: true, legacyHeaders: false });
 
-router.get('/download/:filename', downloadLimiter, (req: Request, res: Response): void => {
+router.get('/download/:filename', downloadLimiter, async (req: Request, res: Response): Promise<void> => {
   const requested = req.params.filename as string;
   if (!requested) {
     res.status(400).json({ error: 'Invalid file' });
@@ -121,19 +129,39 @@ router.get('/download/:filename', downloadLimiter, (req: Request, res: Response)
     return;
   }
 
-  const uploadsRoot = path.resolve(uploadsDir);
-  const filePath = path.resolve(uploadsRoot, requested);
-  if (!filePath.startsWith(uploadsRoot)) {
-    res.status(400).json({ error: 'Invalid file' });
+  const exists = await videoStorage.outputExists(requested);
+  if (!exists) {
+    res.status(404).json({ error: 'File not found' });
     return;
   }
 
-  if (!fs.existsSync(filePath)) {
+  const remoteUrl = await videoStorage.getOutputUrl(requested, true);
+  if (remoteUrl && !remoteUrl.startsWith('/uploads/')) {
+    res.redirect(remoteUrl);
+    return;
+  }
+
+  const uploadsRoot = path.resolve(uploadsOutputDir);
+  const filePath = path.resolve(uploadsRoot, requested);
+  if (!filePath.startsWith(uploadsRoot) || !fs.existsSync(filePath)) {
     res.status(404).json({ error: 'File not found' });
     return;
   }
 
   res.download(filePath);
+});
+
+router.get('/list', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const [uploads, processed] = await Promise.all([
+      videoStorage.listInputs(),
+      videoStorage.listOutputs(),
+    ]);
+    res.json({ uploads, processed });
+  } catch (error) {
+    console.error('List error:', error);
+    res.status(500).json({ error: 'Failed to list videos' });
+  }
 });
 
 export default router;
