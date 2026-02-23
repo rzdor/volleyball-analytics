@@ -61,7 +61,7 @@ router.post('/trim', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: t
       videoUrl,
       storage: videoStorage,
       motionOptions: options,
-      maxBytes: MAX_FILE_SIZE_BYTES,
+      maxBytes: MAX_REMOTE_VIDEO_BYTES,
     });
 
     res.json({

@@ -63,10 +63,10 @@ export async function runTrimPipeline(params: TrimPipelineParams): Promise<TrimP
     return { segments, storedOutput, storedInput, outputPath, downloadedPath };
   } catch (err) {
     if (outputPath && fs.existsSync(outputPath)) {
-      try { fs.unlinkSync(outputPath); } catch (cleanupErr) { console.error('Failed to cleanup output file', cleanupErr); }
+      try { fs.unlinkSync(outputPath); } catch (cleanupErr) { console.error('Failed to clean up output file', cleanupErr); }
     }
     if (downloadedPath && fs.existsSync(downloadedPath)) {
-      try { fs.unlinkSync(downloadedPath); } catch (cleanupErr) { console.error('Failed to cleanup downloaded file', cleanupErr); }
+      try { fs.unlinkSync(downloadedPath); } catch (cleanupErr) { console.error('Failed to clean up downloaded file', cleanupErr); }
     }
     throw err;
   }
