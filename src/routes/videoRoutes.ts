@@ -17,7 +17,7 @@ const router = Router();
 
 const uploadsInputDir = videoStorage.getLocalInputDir();
 const uploadsOutputDir = videoStorage.getLocalOutputDir();
-const MAX_FILE_SIZE_BYTES = MAX_REMOTE_VIDEO_BYTES;
+const MAX_VIDEO_BYTES = MAX_REMOTE_VIDEO_BYTES;
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -40,7 +40,7 @@ const fileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilt
 const upload = multer({
   storage,
   fileFilter,
-  limits: { fileSize: MAX_FILE_SIZE_BYTES } // 100MB limit
+  limits: { fileSize: MAX_VIDEO_BYTES } // 100MB limit
 });
 
 router.post('/trim', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: true, legacyHeaders: false }), upload.single('video'), async (req: Request, res: Response): Promise<void> => {
@@ -61,7 +61,7 @@ router.post('/trim', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: t
       videoUrl,
       storage: videoStorage,
       motionOptions: options,
-      maxBytes: MAX_REMOTE_VIDEO_BYTES,
+      maxBytes: MAX_VIDEO_BYTES,
     });
 
     res.json({
@@ -69,7 +69,7 @@ router.post('/trim', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: t
       segments: result.segments,
       totalSegments: result.segments.length,
       previewUrl: result.storedOutput.url,
-      downloadUrl: result.storedOutput.downloadUrl || result.storedOutput.url,
+      downloadUrl: result.storedOutput.downloadUrl ?? result.storedOutput.url,
       inputUrl: result.storedInput?.url,
     });
   } catch (error) {
