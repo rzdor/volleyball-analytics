@@ -31,7 +31,7 @@ export interface TrimPipelineResult {
 
 export async function runTrimPipeline(params: TrimPipelineParams): Promise<TrimPipelineResult> {
   const storage = params.storage ?? videoStorage;
-  const maxBytes = params.maxBytes ?? MAX_REMOTE_VIDEO_BYTES;
+  const maxBytesLimit = params.maxBytes ?? MAX_REMOTE_VIDEO_BYTES;
   const motionOptions = params.motionOptions;
 
   let inputPath = params.videoPath;
@@ -40,7 +40,7 @@ export async function runTrimPipeline(params: TrimPipelineParams): Promise<TrimP
 
   if (!inputPath) {
     if (params.videoUrl) {
-      inputPath = await downloadVideoFromUrl(params.videoUrl, storage.getLocalInputDir(), maxBytes);
+      inputPath = await downloadVideoFromUrl(params.videoUrl, storage.getLocalInputDir(), maxBytesLimit);
       downloadedPath = inputPath;
     } else {
       throw new VideoDownloadError('No video provided. Upload a file or provide a public link.');

@@ -5,9 +5,12 @@ import { MAX_REMOTE_VIDEO_BYTES, VideoDownloadError } from '../../services/remot
 import { createVideoStorage } from '../../services/storageProvider';
 import { NoSegmentsDetectedError, runTrimPipeline } from '../../services/trimPipeline';
 
+type HttpRequest = { body?: any; query?: Record<string, unknown> };
+type FunctionContext = { res?: any; log?: (...args: any[]) => void };
+
 const storage = createVideoStorage({ baseDir: path.join(os.tmpdir(), 'va-function-uploads') });
 
-export default async function (context: any, req: any): Promise<void> {
+export default async function (context: FunctionContext, req: HttpRequest): Promise<void> {
   const blobUrl =
     typeof req.body?.blobUrl === 'string'
       ? req.body.blobUrl.trim()
