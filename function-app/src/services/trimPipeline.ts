@@ -1,0 +1,85 @@
+import fs from 'fs';
+import path from 'path';
+import { randomUUID } from 'crypto';
+import { MotionDetectorOptions, TimeRange, detectMotionSegments } from './motionDetector';
+import { trimVideoToSegments } from './videoTrimmer';
+import { StoredVideo, VideoStorage, videoStorage } from './storageProvider';
+import { MAX_REMOTE_VIDEO_BYTES, VideoDownloadError, downloadVideoFromUrl } from './remoteVideoDownloader';
+
+export function normalizeVideoUrl(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+export class NoSegmentsDetectedError extends Error {
+  constructor() {
+    super('No motion segments detected');
+  }
+}
+
+export interface TrimPipelineParams {
+  videoPath?: string;
+  videoUrl?: string;
+  storage?: VideoStorage;
+  motionOptions?: MotionDetectorOptions;
+  maxBytes?: number;
+  outputFilename?: string;
+}
+
+export interface TrimPipelineResult {
+  segments: TimeRange[];
+  storedOutput: StoredVideo;
+  storedInput?: StoredVideo;
+  outputPath: string;
+  downloadedPath?: string;
+}
+
+export async function runTrimPipeline(params: TrimPipelineParams): Promise<TrimPipelineResult> {
+  const storage = params.storage ?? videoStorage;
+  const maxBytesLimit = params.maxBytes ?? MAX_REMOTE_VIDEO_BYTES;
+  const motionOptions = params.motionOptions;
+
+  let inputPath = params.videoPath;
+  let downloadedPath: string | undefined;
+  let outputPath: string | undefined;
+
+  if (!inputPath) {
+    if (params.videoUrl) {
+      inputPath = await downloadVideoFromUrl(params.videoUrl, storage.getLocalInputDir(), maxBytesLimit);
+      downloadedPath = inputPath;
+    } else {
+      throw new VideoDownloadError('No video source provided in params. Supply either params.videoPath or params.videoUrl.');
+    }
+  }
+
+  try {
+    const storedInput = await storage.saveInput(inputPath, path.basename(inputPath));
+    const segments = await detectMotionSegments(inputPath, motionOptions);
+
+    if (segments.length === 0) {
+      throw new NoSegmentsDetectedError();
+    }
+
+    const filename = params.outputFilename ?? `trimmed-${randomUUID()}.mp4`;
+    outputPath = path.join(storage.getLocalOutputDir(), filename);
+    await trimVideoToSegments(inputPath, segments, outputPath);
+    const storedOutput = await storage.saveOutput(outputPath, filename);
+
+    return { segments, storedOutput, storedInput, outputPath, downloadedPath };
+  } catch (err) {
+    if (outputPath && fs.existsSync(outputPath)) {
+      try {
+        fs.unlinkSync(outputPath);
+      } catch (cleanupErr) {
+        console.error(`Failed to clean up output file: ${outputPath}`, cleanupErr);
+      }
+    }
+    if (downloadedPath && fs.existsSync(downloadedPath)) {
+      try {
+        fs.unlinkSync(downloadedPath);
+      } catch (cleanupErr) {
+        console.error(`Failed to clean up downloaded file: ${downloadedPath}`, cleanupErr);
+      }
+    }
+    throw err;
+  }
+}

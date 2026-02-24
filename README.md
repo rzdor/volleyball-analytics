@@ -2,6 +2,11 @@
 
 AI-powered web application for analyzing volleyball plays using video frame extraction and GPT-4 Vision.
 
+## Projects
+
+- **Web App (`./`)**: volleyball-analytics web application (Express + frontend UI).
+- **Function App (`function-app/`)**: volleyballanalytics Azure Function(s) for motion-based video trimming.
+
 ## Features
 
 - **Video Upload**: Upload volleyball game footage for AI analysis
@@ -27,7 +32,7 @@ AI-powered web application for analyzing volleyball plays using video frame extr
 
 ## Setup
 
-1. **Install dependencies**
+1. **Install dependencies (web app)**
    ```bash
    npm install
    ```
@@ -38,7 +43,7 @@ AI-powered web application for analyzing volleyball plays using video frame extr
    # Edit .env and add your OpenAI API key
    ```
 
-3. **Build the project**
+3. **Build the web project**
    ```bash
    npm run build
    ```
@@ -49,6 +54,18 @@ AI-powered web application for analyzing volleyball plays using video frame extr
    ```
 
 5. Open http://localhost:3000 in your browser
+
+### Function App (trim service)
+
+The Azure Functions app lives in `function-app/`.
+
+```bash
+cd function-app
+npm install
+npm run build
+```
+
+The build output (host.json, function.json shims, and compiled handlers) is generated under `function-app/dist` for deployment.
 
 ### Azure Blob Storage
 
@@ -128,7 +145,12 @@ volleyball/
 │   ├── styles.css                # Styles
 │   └── app.js                    # Frontend logic
 ├── uploads/                      # Uploaded videos & extracted frames
-└── dist/                         # Compiled JavaScript
+├── dist/                         # Compiled JavaScript for the web app
+└── function-app/                 # Azure Function App project (trimVideo function)
+    ├── src/functions/            # Azure Functions (trimVideo)
+    ├── src/services/             # Shared motion/trim pipeline logic for Functions
+    ├── scripts/copyFunctions.js  # Builds deployable host.json/function.json shims
+    └── dist/                     # Compiled Function App assets
 ```
 
 ## API Endpoints
