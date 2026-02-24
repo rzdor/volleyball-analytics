@@ -58,6 +58,10 @@ fs.readdirSync(source, { withFileTypes: true })
         `Compiled script for function "${entry.name}" not found at ${compiledPath}. Ensure the project is built before packaging functions.`,
       );
     }
-    config.scriptFile = `../functions/${entry.name}/${compiledScript}`;
+    config.scriptFile = './index.js';
     fs.writeFileSync(path.join(shimDir, 'function.json'), JSON.stringify(config, null, 2));
+    fs.writeFileSync(
+      path.join(shimDir, 'index.js'),
+      `module.exports = require('../functions/${entry.name}/${compiledScript}');\n`,
+    );
   });
