@@ -117,7 +117,7 @@ jobs:
     - name: npm install and build (functions)
       run: |
         npm install
-        npm run build --if-present
+        npm run build
       working-directory: ${{ env.FUNCTIONAPP_WORKING_DIRECTORY }}
 
     - name: Prepare function runtime dependencies
