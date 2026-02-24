@@ -17,7 +17,7 @@ uploads/*
 src/services/frames/
 
 # IDE
-.vscode/
+
 .idea/
 *.swp
 *.swo
