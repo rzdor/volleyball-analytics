@@ -4,7 +4,7 @@ AI-powered web application for analyzing volleyball plays using video frame extr
 
 ## Projects
 
-- **Web App (`./`)**: volleyball-analytics web application (Express + frontend UI).
+- **Web App (`web-application/`)**: volleyball-analytics web application (Express + frontend UI).
 - **Function App (`function-app/`)**: volleyballanalytics Azure Function(s) for motion-based video trimming.
 
 ## Features
@@ -34,6 +34,7 @@ AI-powered web application for analyzing volleyball plays using video frame extr
 
 1. **Install dependencies (web app)**
    ```bash
+   cd web-application
    npm install
    ```
 
@@ -130,22 +131,23 @@ Analyze a play based on text description.
 ## Project Structure
 
 ```
-volleyball/
-├── src/
-│   ├── index.ts                  # Express server
-│   ├── routes/
-│   │   └── videoRoutes.ts        # API routes
-│   └── services/
-│       ├── videoAnalyzer.ts      # AI analysis service
-│       ├── frameExtractor.ts     # ffmpeg frame extraction
-│       ├── motionDetector.ts     # Motion-based play segment detection
-│       └── videoTrimmer.ts       # ffmpeg segment concatenation
-├── public/
-│   ├── index.html                # Frontend UI
-│   ├── styles.css                # Styles
-│   └── app.js                    # Frontend logic
-├── uploads/                      # Uploaded videos & extracted frames
-├── dist/                         # Compiled JavaScript for the web app
+volleyball-analytics/
+├── web-application/              # Web application project
+│   ├── src/
+│   │   ├── index.ts              # Express server
+│   │   ├── routes/
+│   │   │   └── videoRoutes.ts    # API routes
+│   │   └── services/
+│   │       ├── videoAnalyzer.ts      # AI analysis service
+│   │       ├── frameExtractor.ts     # ffmpeg frame extraction
+│   │       ├── motionDetector.ts     # Motion-based play segment detection
+│   │       └── videoTrimmer.ts       # ffmpeg segment concatenation
+│   ├── public/
+│   │   ├── index.html            # Frontend UI
+│   │   ├── styles.css            # Styles
+│   │   └── app.js                # Frontend logic
+│   ├── uploads/                  # Uploaded videos & extracted frames
+│   └── dist/                     # Compiled JavaScript for the web app
 └── function-app/                 # Azure Function App project (trimVideo function)
     ├── src/functions/            # Azure Functions (trimVideo)
     ├── src/services/             # Shared motion/trim pipeline logic for Functions

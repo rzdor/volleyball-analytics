@@ -27,7 +27,7 @@ env:
   AZURE_FUNCTIONAPP_NAME: volleyballanalytics         # set this to your Azure Function App name to deploy functions
   AZURE_FUNCTIONAPP_PACKAGE_PATH: 'function-app/dist' # path to built Azure Functions (expects host.json inside)
   FUNCTIONAPP_WORKING_DIRECTORY: 'function-app'
-  WEBAPP_WORKING_DIRECTORY: '.'
+  WEBAPP_WORKING_DIRECTORY: 'web-application'
   NODE_VERSION: '24.x'                # set this to the node version to use
 
 permissions:
@@ -45,7 +45,7 @@ jobs:
       with:
         node-version: ${{ env.NODE_VERSION }}
         cache: 'npm'
-        cache-dependency-path: package-lock.json
+        cache-dependency-path: web-application/package-lock.json
 
     - name: npm install, build, and test (web)
       run: |
@@ -59,17 +59,16 @@ jobs:
       with:
         name: web-app
         path: |
-          package.json
-          package-lock.json
-          tsconfig.json
-          jest.config.js
+          web-application/package.json
+          web-application/package-lock.json
+          web-application/tsconfig.json
+          web-application/jest.config.js
+          web-application/dist
+          web-application/public
+          web-application/src
+          web-application/uploads
+          web-application/.env.example
           README.md
-          dist
-          public
-          src
-          uploads
-          .env.example
-          scripts
 
   deploy_web:
     permissions:
@@ -100,7 +99,7 @@ jobs:
       uses: azure/webapps-deploy@v3
       with:
         app-name: ${{ env.AZURE_WEBAPP_NAME }}
-        package: web-app/${{ env.AZURE_WEBAPP_PACKAGE_PATH }}
+        package: web-app/web-application/${{ env.AZURE_WEBAPP_PACKAGE_PATH }}
 
   build_functions:
     runs-on: ubuntu-latest
