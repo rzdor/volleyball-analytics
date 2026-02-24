@@ -22,9 +22,9 @@ on:
   workflow_dispatch:
 
 env:
-  AZURE_WEBAPP_NAME: volleyball-analytics    # set this to your application's name
+  AZURE_WEBAPP_NAME: ${{ vars.AZURE_WEBAPP_NAME || '' }}    # set AZURE_WEBAPP_NAME in GitHub repo variables if you have a Web App to deploy to
   AZURE_WEBAPP_PACKAGE_PATH: '.'      # set this to the path to your web app project, defaults to the repository root
-  AZURE_FUNCTIONAPP_NAME: ${{ vars.AZURE_FUNCTIONAPP_NAME || '' }}          # set this to your Azure Function App name to deploy functions
+  AZURE_FUNCTIONAPP_NAME: ${{ vars.AZURE_FUNCTIONAPP_NAME || 'volleyballanalytics' }}  # Azure Function App name; override via AZURE_FUNCTIONAPP_NAME repo variable
   AZURE_FUNCTIONAPP_PACKAGE_PATH: 'dist' # path to built Azure Functions (expects host.json inside)
   NODE_VERSION: '24.x'                # set this to the node version to use
 
@@ -89,6 +89,7 @@ jobs:
 
     - name: 'Deploy to Azure WebApp'
       id: deploy-to-webapp
+      if: env.AZURE_WEBAPP_NAME != ''
       uses: azure/webapps-deploy@v3
       with:
         app-name: ${{ env.AZURE_WEBAPP_NAME }}
