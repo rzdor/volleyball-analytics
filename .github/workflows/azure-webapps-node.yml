@@ -64,6 +64,7 @@ jobs:
           tsconfig.json
           jest.config.js
           README.md
+          dist
           public
           src
           uploads
