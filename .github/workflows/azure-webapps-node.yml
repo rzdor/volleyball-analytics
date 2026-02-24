@@ -25,7 +25,7 @@ env:
   AZURE_WEBAPP_NAME: volleyball-analytics    # set this to your application's name
   AZURE_WEBAPP_PACKAGE_PATH: '.'      # path to the web app project for deployment
   AZURE_FUNCTIONAPP_NAME: volleyballanalytics         # set this to your Azure Function App name to deploy functions
-  AZURE_FUNCTIONAPP_PACKAGE_PATH: 'function-app' # path to built Azure Functions (expects host.json inside)
+  AZURE_FUNCTIONAPP_PACKAGE_PATH: 'function-app/dist' # path to built Azure Functions (expects host.json inside)
   FUNCTIONAPP_WORKING_DIRECTORY: 'function-app'
   WEBAPP_WORKING_DIRECTORY: '.'
   NODE_VERSION: '24.x'                # set this to the node version to use
@@ -149,6 +149,7 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         name: function-app
+        path: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
 
     - name: Azure Login using OIDC
       uses: azure/login@v2
