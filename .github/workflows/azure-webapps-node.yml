@@ -59,8 +59,16 @@ jobs:
       with:
         name: web-app
         path: |
-          ${{ env.WEBAPP_WORKING_DIRECTORY }}
-          !function-app/**
+          package.json
+          package-lock.json
+          tsconfig.json
+          jest.config.js
+          README.md
+          public
+          src
+          uploads
+          .env.example
+          scripts
 
   deploy_web:
     permissions:
