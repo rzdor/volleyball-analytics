@@ -133,7 +133,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: function-app
-        path: ${{ env.FUNCTIONAPP_PACKAGE_PATH }}
+        path: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
 
   deploy_functions:
     permissions:
