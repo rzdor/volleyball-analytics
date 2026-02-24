@@ -45,7 +45,7 @@ jobs:
       with:
         node-version: ${{ env.NODE_VERSION }}
         cache: 'npm'
-        cache-dependency-path: function-app/package-lock.json
+        cache-dependency-path: package-lock.json
 
     - name: npm install, build, and test (web)
       run: |
@@ -103,6 +103,7 @@ jobs:
       with:
         node-version: ${{ env.NODE_VERSION }}
         cache: 'npm'
+        cache-dependency-path: function-app/package-lock.json
 
     - name: npm install and build (functions)
       run: |
