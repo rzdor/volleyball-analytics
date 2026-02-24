@@ -13,7 +13,10 @@ const storage = createVideoStorage({ baseDir: path.join(os.tmpdir(), 'va-functio
 export default async function (context: TrimVideoContext, req: TrimVideoRequest): Promise<void> {
   const blobUrl = normalizeVideoUrl(req.body?.blobUrl ?? req.query?.blobUrl);
 
+  context.log?.('trimVideo request received', { blobUrl });
+
   if (!blobUrl) {
+    context.log?.('trimVideo missing blobUrl');
     context.res = { status: 400, body: { error: 'blobUrl is required' } };
     return;
   }
@@ -27,12 +30,19 @@ export default async function (context: TrimVideoContext, req: TrimVideoRequest)
     smoothingWindow: parseInt(req.body?.smoothingWindow, 10) || 3,
   };
 
+  context.log?.('trimVideo starting pipeline', { blobUrl, options });
+
   try {
     const result = await runTrimPipeline({
       videoUrl: blobUrl,
       storage,
       motionOptions: options,
       maxBytes: MAX_REMOTE_VIDEO_BYTES,
+    });
+
+    context.log?.('trimVideo pipeline succeeded', {
+      totalSegments: result.segments.length,
+      outputName: result.storedOutput.name,
     });
 
     context.res = {
@@ -49,6 +59,7 @@ export default async function (context: TrimVideoContext, req: TrimVideoRequest)
     };
   } catch (error) {
     if (error instanceof NoSegmentsDetectedError) {
+      context.log?.('trimVideo no segments detected', { blobUrl, options });
       context.res = {
         status: 422,
         body: { error: 'No motion segments detected. Try lowering the threshold.', segments: [] },
@@ -57,6 +68,7 @@ export default async function (context: TrimVideoContext, req: TrimVideoRequest)
     }
     if (error instanceof VideoDownloadError) {
       const statusCode = typeof error.statusCode === 'number' ? error.statusCode : 500;
+      context.log?.('trimVideo video download error', { blobUrl, statusCode, message: error.message });
       context.res = { status: statusCode, body: { error: error.message } };
       return;
     }
