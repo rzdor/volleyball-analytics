@@ -24,6 +24,8 @@ on:
 env:
   AZURE_WEBAPP_NAME: volleyball-analytics    # set this to your application's name
   AZURE_WEBAPP_PACKAGE_PATH: '.'      # set this to the path to your web app project, defaults to the repository root
+  AZURE_FUNCTIONAPP_NAME: ${{ vars.AZURE_FUNCTIONAPP_NAME || '' }}          # set this to your Azure Function App name to deploy functions
+  AZURE_FUNCTIONAPP_PACKAGE_PATH: 'dist' # path to built Azure Functions (expects host.json inside)
   NODE_VERSION: '24.x'                # set this to the node version to use
 
 permissions:
@@ -47,6 +49,14 @@ jobs:
         npm install
         npm run build --if-present
         npm run test --if-present
+
+    - name: Prepare function runtime dependencies
+      run: |
+        if [ ! -f dist/package-lock.json ]; then
+          echo 'Error: dist/package-lock.json not found. Verify the build completed and copyFunctions.js copied the package files into dist.'
+          exit 1
+        fi
+        npm ci --omit=dev --prefix dist
 
     - name: Upload artifact for deployment job
       uses: actions/upload-artifact@v4
@@ -83,3 +93,10 @@ jobs:
       with:
         app-name: ${{ env.AZURE_WEBAPP_NAME }}
         package: ${{ env.AZURE_WEBAPP_PACKAGE_PATH }}
+
+    - name: 'Deploy Azure Functions (trimVideo)'
+      if: env.AZURE_FUNCTIONAPP_NAME != ''
+      uses: Azure/functions-action@v1
+      with:
+        app-name: ${{ env.AZURE_FUNCTIONAPP_NAME }}
+        package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
