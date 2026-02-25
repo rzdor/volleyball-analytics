@@ -25,8 +25,8 @@ env:
   AZURE_WEBAPP_NAME: volleyball-analytics    # set this to your application's name
   AZURE_WEBAPP_PACKAGE_PATH: '.'      # path to the web app project for deployment
   AZURE_FUNCTIONAPP_NAME: volleyballanalytics         # set this to your Azure Function App name to deploy functions
-  AZURE_FUNCTIONAPP_PACKAGE_PATH: 'function-app/dist' # path to built Azure Functions (expects host.json inside)
-  FUNCTIONAPP_WORKING_DIRECTORY: 'function-app'
+  AZURE_FUNCTIONAPP_PACKAGE_PATH: 'video-processing' # path to the video-processing project for deployment
+  FUNCTIONAPP_WORKING_DIRECTORY: 'video-processing'
   WEBAPP_WORKING_DIRECTORY: 'web-application'
   NODE_VERSION: '24.x'                # set this to the node version to use
 
@@ -111,21 +111,16 @@ jobs:
       with:
         node-version: ${{ env.NODE_VERSION }}
         cache: 'npm'
-        cache-dependency-path: function-app/package-lock.json
+        cache-dependency-path: video-processing/package-lock.json
 
-    - name: npm install and build (functions)
+    - name: npm install and build (video-processing)
       run: |
         npm install
         npm run build
       working-directory: ${{ env.FUNCTIONAPP_WORKING_DIRECTORY }}
 
-    - name: Prepare function runtime dependencies
-      run: |
-        if [ ! -f dist/package-lock.json ]; then
-          echo 'Error: dist/package-lock.json not found. Verify the build completed and copyFunctions.js copied the package files into dist.'
-          exit 1
-        fi
-        npm ci --omit=dev --prefix dist
+    - name: Install production dependencies
+      run: npm ci --omit=dev
       working-directory: ${{ env.FUNCTIONAPP_WORKING_DIRECTORY }}
 
     - name: Upload function artifact for deployment job
