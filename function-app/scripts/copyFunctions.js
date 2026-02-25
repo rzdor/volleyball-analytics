@@ -42,5 +42,9 @@ if (fs.existsSync(compiledFunctionsDir)) {
     if (fs.existsSync(compiledServicesDir)) {
       fs.cpSync(compiledServicesDir, path.join(funcDir, 'services'), { recursive: true });
     }
+
+    // Create function.json required by Azure Functions runtime
+    const functionJson = JSON.stringify({ scriptFile: './index.js' }, null, 2);
+    fs.writeFileSync(path.join(funcDir, 'function.json'), functionJson, 'utf8');
   });
 }
