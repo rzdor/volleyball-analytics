@@ -25,7 +25,7 @@ env:
   AZURE_WEBAPP_NAME: volleyball-analytics    # set this to your application's name
   AZURE_WEBAPP_PACKAGE_PATH: '.'      # path to the web app project for deployment
   AZURE_FUNCTIONAPP_NAME: volleyballanalytics         # set this to your Azure Function App name to deploy functions
-  AZURE_FUNCTIONAPP_PACKAGE_PATH: 'video-processing' # path to the video-processing project for deployment
+  AZURE_FUNCTIONAPP_PACKAGE_PATH: 'video-processing/dist' # path to the video-processing project for deployment
   FUNCTIONAPP_WORKING_DIRECTORY: 'video-processing'
   WEBAPP_WORKING_DIRECTORY: 'web-application'
   NODE_VERSION: '24.x'                # set this to the node version to use
