@@ -8,7 +8,7 @@ export async function testrequest(request: HttpRequest, context: InvocationConte
     return { body: `Hello, ${name}!` };
 };
 
-app.http('testrequest', {
+app.http('testrequest1', {
     methods: ['GET', 'POST'],
     authLevel: 'anonymous',
     handler: testrequest
