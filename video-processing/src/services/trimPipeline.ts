@@ -3,7 +3,7 @@ import path from 'path';
 import { randomUUID } from 'crypto';
 import { MotionDetectorOptions, TimeRange, detectMotionSegments } from './motionDetector';
 import { trimVideoToSegments } from './videoTrimmer';
-import { StoredVideo, VideoStorage, videoStorage } from './storageProvider';
+import { StoredVideo, VideoStorage, getDefaultStorage } from './storageProvider';
 import { MAX_REMOTE_VIDEO_BYTES, VideoDownloadError, downloadVideoFromUrl } from './remoteVideoDownloader';
 
 export function normalizeVideoUrl(value: unknown): string {
@@ -34,7 +34,7 @@ export interface TrimPipelineResult {
 }
 
 export async function runTrimPipeline(params: TrimPipelineParams): Promise<TrimPipelineResult> {
-  const storage = params.storage ?? videoStorage;
+  const storage = params.storage ?? getDefaultStorage();
   const maxBytesLimit = params.maxBytes ?? MAX_REMOTE_VIDEO_BYTES;
   const motionOptions = params.motionOptions;
 

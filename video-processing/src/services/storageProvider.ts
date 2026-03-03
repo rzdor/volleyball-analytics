@@ -274,4 +274,10 @@ export function createVideoStorage(options?: StorageOptions): VideoStorage {
   return new VideoStorage(options);
 }
 
-export const videoStorage = createVideoStorage();
+let _defaultStorage: VideoStorage | undefined;
+export function getDefaultStorage(): VideoStorage {
+  if (!_defaultStorage) {
+    _defaultStorage = createVideoStorage();
+  }
+  return _defaultStorage;
+}
