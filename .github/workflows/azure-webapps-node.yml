@@ -67,6 +67,7 @@ jobs:
           web-application/public
           web-application/src
           web-application/uploads
+          web-application/web.config
           web-application/.env.example
           README.md
 

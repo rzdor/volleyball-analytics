@@ -107,8 +107,8 @@
       "name": "[variables('webAppPlanName')]",
       "location": "[parameters('location')]",
       "sku": {
-        "name": "D1",
-        "tier": "Shared"
+        "name": "B1",
+        "tier": "Basic"
       },
       "properties": {}
     },
