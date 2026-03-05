@@ -7,8 +7,8 @@ RUN apt-get update && \
 ENV AzureWebJobsScriptRoot=/home/site/wwwroot \
     AzureFunctionsJobHost__Logging__Console__IsEnabled=true
 
-COPY dist/ /home/site/wwwroot/
-COPY package.json package-lock.json /home/site/wwwroot/
+COPY package.json package-lock.json host.json /home/site/wwwroot/
+COPY dist/ /home/site/wwwroot/dist/
 
 WORKDIR /home/site/wwwroot
 RUN npm ci --omit=dev
