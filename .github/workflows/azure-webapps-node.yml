@@ -16,8 +16,6 @@
 #    - AZURE_TENANT_ID: Directory (tenant) ID from Microsoft Entra ID
 #    - AZURE_SUBSCRIPTION_ID: Your Azure subscription ID
 #
-# 4. Create these GitHub repository variables (Settings > Variables > Actions):
-#    - AZURE_RESOURCE_GROUP: Name of the Azure resource group (e.g. volleyball-rg)
 
 on:
   push:
@@ -64,18 +62,15 @@ jobs:
       run: npm ci --omit=dev
       working-directory: ${{ env.WEBAPP_WORKING_DIRECTORY }}
 
+    - name: Create deployment package
+      run: zip -rq ../web-app.zip package.json package-lock.json dist/ node_modules/ public/ uploads/ web.config
+      working-directory: ${{ env.WEBAPP_WORKING_DIRECTORY }}
+
     - name: Upload web artifact for deployment job
       uses: actions/upload-artifact@v4
       with:
         name: web-app
-        path: |
-          web-application/package.json
-          web-application/package-lock.json
-          web-application/dist
-          web-application/node_modules
-          web-application/public
-          web-application/uploads
-          web-application/web.config
+        path: web-app.zip
 
   deploy_web:
     permissions:
@@ -92,7 +87,6 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         name: web-app
-        path: web-app
 
     - name: Azure Login using OIDC
       uses: azure/login@v2
@@ -106,7 +100,7 @@ jobs:
       uses: azure/webapps-deploy@v3
       with:
         app-name: ${{ env.AZURE_WEBAPP_NAME }}
-        package: web-app
+        package: web-app.zip
 
   build_and_deploy_functions:
     permissions:
@@ -148,4 +142,4 @@ jobs:
       working-directory: ${{ env.FUNCTIONAPP_WORKING_DIRECTORY }}
 
     - name: Restart Function App to pull new image
-      run: az webapp restart --name ${{ env.AZURE_FUNCTIONAPP_NAME }} --resource-group ${{ vars.AZURE_RESOURCE_GROUP }}
+      run: az webapp restart --name ${{ env.AZURE_FUNCTIONAPP_NAME }} --resource-group ${{ env.AZURE_RESOURCE_GROUP }}
