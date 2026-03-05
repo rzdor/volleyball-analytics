@@ -15,6 +15,7 @@
 #    - AZURE_CLIENT_ID: Application (client) ID from App Registration
 #    - AZURE_TENANT_ID: Directory (tenant) ID from Microsoft Entra ID
 #    - AZURE_SUBSCRIPTION_ID: Your Azure subscription ID
+#    - AZURE_RESOURCE_GROUP: Name of the Azure resource group (e.g. volleyball-rg)
 
 on:
   push:
@@ -29,6 +30,8 @@ env:
   FUNCTIONAPP_WORKING_DIRECTORY: 'video-processing'
   WEBAPP_WORKING_DIRECTORY: 'web-application'
   NODE_VERSION: '24.x'                # set this to the node version to use
+  ACR_NAME: 'volleyballacr'           # Azure Container Registry name
+  ACR_IMAGE: 'volleyball-functions'   # Docker image name in ACR
 
 permissions:
   id-token: write
@@ -102,8 +105,13 @@ jobs:
         app-name: ${{ env.AZURE_WEBAPP_NAME }}
         package: web-app
 
-  build_functions:
+  build_and_deploy_functions:
+    permissions:
+      id-token: write
+      contents: read
     runs-on: ubuntu-latest
+    environment:
+      name: 'Development'
     steps:
     - uses: actions/checkout@v4
 
@@ -120,32 +128,6 @@ jobs:
         npm run build
       working-directory: ${{ env.FUNCTIONAPP_WORKING_DIRECTORY }}
 
-    - name: Install production dependencies
-      run: npm ci --omit=dev
-      working-directory: ${{ env.FUNCTIONAPP_WORKING_DIRECTORY }}
-
-    - name: Upload function artifact for deployment job
-      uses: actions/upload-artifact@v4
-      with:
-        name: function-app
-        path: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
-
-  deploy_functions:
-    permissions:
-      id-token: write
-      contents: read
-    runs-on: ubuntu-latest
-    needs: build_functions
-    environment:
-      name: 'Development'
-
-    steps:
-    - name: Download function artifact from build job
-      uses: actions/download-artifact@v4
-      with:
-        name: function-app
-        path: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
-
     - name: Azure Login using OIDC
       uses: azure/login@v2
       with:
@@ -153,9 +135,14 @@ jobs:
         tenant-id: ${{ secrets.AZURE_TENANT_ID }}
         subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-    - name: 'Deploy Azure Functions'
-      id: deploy-to-functions
-      uses: Azure/functions-action@v1
-      with:
-        app-name: ${{ env.AZURE_FUNCTIONAPP_NAME }}
-        package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
+    - name: Build and push Docker image to ACR
+      run: |
+        az acr build \
+          --registry ${{ env.ACR_NAME }} \
+          --image ${{ env.ACR_IMAGE }}:${{ github.sha }} \
+          --image ${{ env.ACR_IMAGE }}:latest \
+          .
+      working-directory: ${{ env.FUNCTIONAPP_WORKING_DIRECTORY }}
+
+    - name: Restart Function App to pull new image
+      run: az webapp restart --name ${{ env.AZURE_FUNCTIONAPP_NAME }} --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }}
