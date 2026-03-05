@@ -5,8 +5,8 @@
     "projectName": {
       "value": "volleyball"
     },
-    "functionAppDockerImage": {
-      "value": "mcr.microsoft.com/azure-functions/node:4-node20"
+    "acrSku": {
+      "value": "Basic"
     },
     "videoBlobContainerName": {
       "value": "videos"

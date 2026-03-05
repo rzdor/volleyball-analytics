@@ -16,11 +16,12 @@
         "description": "Azure region for all resources."
       }
     },
-    "functionAppDockerImage": {
+    "acrSku": {
       "type": "string",
-      "defaultValue": "mcr.microsoft.com/azure-functions/node:4-node20",
+      "defaultValue": "Basic",
+      "allowedValues": ["Basic", "Standard", "Premium"],
       "metadata": {
-        "description": "Docker image for the Function App container (must include ffmpeg)."
+        "description": "SKU tier for the Azure Container Registry."
       }
     },
     "videoBlobContainerName": {
@@ -37,8 +38,10 @@
     "webAppPlanName": "[format('{0}-web-plan', parameters('projectName'))]",
     "functionAppPlanName": "[format('{0}-func-plan', parameters('projectName'))]",
     "storageAccountName": "[format('{0}storage', replace(parameters('projectName'), '-', ''))]",
+    "acrName": "[format('{0}acr', replace(parameters('projectName'), '-', ''))]",
     "appInsightsName": "[format('{0}-insights', parameters('projectName'))]",
-    "logAnalyticsName": "[format('{0}-logs', parameters('projectName'))]"
+    "logAnalyticsName": "[format('{0}-logs', parameters('projectName'))]",
+    "functionAppImageName": "[format('{0}acr.azurecr.io/{0}-functions:latest', replace(parameters('projectName'), '-', ''))]"
   },
   "resources": [
     {
@@ -99,6 +102,18 @@
       ],
       "properties": {
         "publicAccess": "None"
+      }
+    },
+    {
+      "type": "Microsoft.ContainerRegistry/registries",
+      "apiVersion": "2023-07-01",
+      "name": "[variables('acrName')]",
+      "location": "[parameters('location')]",
+      "sku": {
+        "name": "[parameters('acrSku')]"
+      },
+      "properties": {
+        "adminUserEnabled": true
       }
     },
     {
@@ -203,14 +218,27 @@
       "dependsOn": [
         "[resourceId('Microsoft.Web/serverfarms', variables('functionAppPlanName'))]",
         "[resourceId('Microsoft.Insights/components', variables('appInsightsName'))]",
-        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]",
+        "[resourceId('Microsoft.ContainerRegistry/registries', variables('acrName'))]"
       ],
       "properties": {
         "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('functionAppPlanName'))]",
         "httpsOnly": true,
         "siteConfig": {
-          "linuxFxVersion": "[format('DOCKER|{0}', parameters('functionAppDockerImage'))]",
+          "linuxFxVersion": "[format('DOCKER|{0}', variables('functionAppImageName'))]",
           "appSettings": [
+            {
+              "name": "DOCKER_REGISTRY_SERVER_URL",
+              "value": "[format('https://{0}.azurecr.io', variables('acrName'))]"
+            },
+            {
+              "name": "DOCKER_REGISTRY_SERVER_USERNAME",
+              "value": "[listCredentials(resourceId('Microsoft.ContainerRegistry/registries', variables('acrName')), '2023-07-01').username]"
+            },
+            {
+              "name": "DOCKER_REGISTRY_SERVER_PASSWORD",
+              "value": "[listCredentials(resourceId('Microsoft.ContainerRegistry/registries', variables('acrName')), '2023-07-01').passwords[0].value]"
+            },
             {
               "name": "AzureWebJobsStorage",
               "value": "[format('DefaultEndpointsProtocol=https;AccountName={0};AccountKey={1};EndpointSuffix=core.windows.net', variables('storageAccountName'), listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2023-01-01').keys[0].value)]"
@@ -296,6 +324,14 @@
     "appInsightsInstrumentationKey": {
       "type": "string",
       "value": "[reference(resourceId('Microsoft.Insights/components', variables('appInsightsName'))).InstrumentationKey]"
+    },
+    "acrLoginServer": {
+      "type": "string",
+      "value": "[format('{0}.azurecr.io', variables('acrName'))]"
+    },
+    "acrName": {
+      "type": "string",
+      "value": "[variables('acrName')]"
     }
   }
 }
