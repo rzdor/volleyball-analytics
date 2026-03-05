@@ -4,20 +4,38 @@ import path from 'path';
 import fs from 'fs';
 import { randomUUID } from 'crypto';
 import rateLimit from 'express-rate-limit';
-import { MotionDetectorOptions } from '../services/motionDetector';
-import {
-  ALLOWED_VIDEO_MIME_TYPES,
-  MAX_REMOTE_VIDEO_BYTES,
-  VideoDownloadError,
-} from '../services/remoteVideoDownloader';
-import { videoStorage } from '../services/storageProvider';
-import { NoSegmentsDetectedError, normalizeVideoUrl, runTrimPipeline } from '../services/trimPipeline';
+import { BlobServiceClient } from '@azure/storage-blob';
 
 const router = Router();
 
-const uploadsInputDir = videoStorage.getLocalInputDir();
-const uploadsOutputDir = videoStorage.getLocalOutputDir();
-const MAX_VIDEO_BYTES = MAX_REMOTE_VIDEO_BYTES;
+const uploadsInputDir = path.resolve(process.cwd(), 'uploads/input');
+const MAX_VIDEO_BYTES = 100 * 1024 * 1024; // 100MB
+const BLOB_CONTAINER = process.env.VIDEO_BLOB_CONTAINER || 'videos';
+const BLOB_FOLDER = 'volleyball/video';
+
+function getBlobServiceClient(): BlobServiceClient {
+  const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
+  if (!connectionString) {
+    throw new Error('AZURE_STORAGE_CONNECTION_STRING is not configured');
+  }
+  return BlobServiceClient.fromConnectionString(connectionString);
+}
+
+async function uploadToBlob(filePath: string, blobName: string): Promise<string> {
+  const blobService = getBlobServiceClient();
+  const containerClient = blobService.getContainerClient(BLOB_CONTAINER);
+  await containerClient.createIfNotExists();
+  const blockBlobClient = containerClient.getBlockBlobClient(`${BLOB_FOLDER}/${blobName}`);
+  await blockBlobClient.uploadFile(filePath);
+  return blockBlobClient.url;
+}
+
+const ALLOWED_VIDEO_MIME_TYPES = [
+  'video/mp4',
+  'video/quicktime',
+  'video/x-msvideo',
+  'video/webm',
+] as const;
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -40,98 +58,52 @@ const fileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilt
 const upload = multer({
   storage,
   fileFilter,
-  limits: { fileSize: MAX_VIDEO_BYTES } // 100MB limit
+  limits: { fileSize: MAX_VIDEO_BYTES }
 });
 
+// TODO: Update to call the Function App video-processing endpoint
 router.post('/trim', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: true, legacyHeaders: false }), upload.single('video'), async (req: Request, res: Response): Promise<void> => {
   try {
-    const videoUrl = normalizeVideoUrl(req.body.videoUrl);
+    if (!req.file) {
+      res.status(400).json({ error: 'No video file provided.' });
+      return;
+    }
 
-    const options: MotionDetectorOptions = {
-      sampleFps: parseFloat(req.body.sampleFps) || 2,
-      threshold: parseFloat(req.body.threshold) || 0.02,
-      minSegmentLength: parseFloat(req.body.minSegmentLength) || 3,
-      preRoll: parseFloat(req.body.preRoll) || 1,
-      postRoll: parseFloat(req.body.postRoll) || 1,
-      smoothingWindow: parseInt(req.body.smoothingWindow, 10) || 3,
-    };
+    const blobName = req.file.filename;
+    const blobUrl = await uploadToBlob(req.file.path, blobName);
 
-    const result = await runTrimPipeline({
-      videoPath: req.file?.path,
-      videoUrl,
-      storage: videoStorage,
-      motionOptions: options,
-      maxBytes: MAX_VIDEO_BYTES,
-    });
+    // Clean up local temp file
+    fs.unlink(req.file.path, () => {});
 
     res.json({
       success: true,
-      segments: result.segments,
-      totalSegments: result.segments.length,
-      previewUrl: result.storedOutput.url,
-      downloadUrl: result.storedOutput.downloadUrl ?? result.storedOutput.url,
-      inputUrl: result.storedInput?.url,
+      blobUrl,
+      blobName: `${BLOB_FOLDER}/${blobName}`,
+      container: BLOB_CONTAINER,
     });
   } catch (error) {
-    console.error('Trim error:', error);
-    if (error instanceof NoSegmentsDetectedError) {
-      res.status(422).json({
-        error: 'No motion segments detected. Try lowering the threshold.',
-        segments: [],
-      });
-      return;
-    }
-    if (error instanceof VideoDownloadError) {
-      res.status(error.statusCode).json({ error: error.message });
-      return;
-    }
-    res.status(500).json({ error: 'Failed to trim video' });
+    console.error('Upload error:', error);
+    if (req.file?.path) fs.unlink(req.file.path, () => {});
+    res.status(500).json({ error: 'Failed to upload video' });
   }
-});
-
-const TRIMMED_FILE_PATTERN = /^trimmed-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\.mp4$/i;
-const downloadLimiter = rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: true, legacyHeaders: false });
-
-router.get('/download/:filename', downloadLimiter, async (req: Request, res: Response): Promise<void> => {
-  const requested = req.params.filename as string;
-  if (!requested) {
-    res.status(400).json({ error: 'Invalid file' });
-    return;
-  }
-  if (!TRIMMED_FILE_PATTERN.test(requested)) {
-    res.status(400).json({ error: 'Invalid file' });
-    return;
-  }
-
-  const exists = await videoStorage.outputExists(requested);
-  if (!exists) {
-    res.status(404).json({ error: 'File not found' });
-    return;
-  }
-
-  const remoteUrl = await videoStorage.getOutputUrl(requested, true);
-  if (remoteUrl && !remoteUrl.startsWith('/uploads/')) {
-    res.redirect(remoteUrl);
-    return;
-  }
-
-  const uploadsRoot = path.resolve(uploadsOutputDir);
-  const filePath = path.resolve(uploadsRoot, requested);
-  if (!filePath.startsWith(uploadsRoot) || !fs.existsSync(filePath)) {
-    res.status(404).json({ error: 'File not found' });
-    return;
-  }
-
-  res.download(filePath);
 });
 
 router.get('/list', async (_req: Request, res: Response): Promise<void> => {
   try {
-    const [uploads, processed] = await Promise.all([
-      videoStorage.listInputs(),
-      videoStorage.listOutputs(),
-    ]);
-    res.json({ uploads, processed });
+    const blobService = getBlobServiceClient();
+    const containerClient = blobService.getContainerClient(BLOB_CONTAINER);
+    const videos: { name: string; url: string; createdOn?: Date }[] = [];
+
+    for await (const blob of containerClient.listBlobsFlat({ prefix: `${BLOB_FOLDER}/` })) {
+      const blobClient = containerClient.getBlobClient(blob.name);
+      videos.push({
+        name: blob.name.replace(`${BLOB_FOLDER}/`, ''),
+        url: blobClient.url,
+        createdOn: blob.properties.createdOn,
+      });
+    }
+
+    res.json({ videos });
   } catch (error) {
     console.error('List error:', error);
     res.status(500).json({ error: 'Failed to list videos' });
