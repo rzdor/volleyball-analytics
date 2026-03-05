@@ -8,7 +8,7 @@ import { BlobServiceClient } from '@azure/storage-blob';
 
 const router = Router();
 
-const uploadsInputDir = path.resolve(process.cwd(), 'uploads/input');
+const uploadsInputDir = path.resolve(process.cwd(), 'uploads/inputs');
 const MAX_VIDEO_BYTES = 100 * 1024 * 1024; // 100MB
 const BLOB_CONTAINER = process.env.VIDEO_BLOB_CONTAINER || 'videos';
 const BLOB_FOLDER = 'volleyball/video';

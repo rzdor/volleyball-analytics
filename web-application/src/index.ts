@@ -4,10 +4,17 @@ dotenv.config();
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
+import fs from 'fs';
 import videoRoutes from './routes/videoRoutes';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Ensure uploads directories exist
+const uploadsInputDir = path.join(process.cwd(), 'uploads/inputs');
+const uploadsProcessedDir = path.join(process.cwd(), 'uploads/processed');
+fs.mkdirSync(uploadsInputDir, { recursive: true });
+fs.mkdirSync(uploadsProcessedDir, { recursive: true });
 
 app.use(cors());
 app.use(express.json());
