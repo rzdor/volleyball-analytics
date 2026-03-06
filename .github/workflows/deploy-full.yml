@@ -47,7 +47,7 @@ env:
   AZURE_FUNCTIONAPP_NAME: 'volleyball-functions'
   WEBAPP_WORKING_DIRECTORY: 'web-application'
   FUNCTIONAPP_WORKING_DIRECTORY: 'video-processing'
-  NODE_VERSION: '24.x'
+  NODE_VERSION: '20.x'
   ACR_NAME: 'volleyballacr'
   ACR_IMAGE: 'volleyball-functions'
 

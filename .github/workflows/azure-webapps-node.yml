@@ -39,7 +39,7 @@ env:
   FUNCTIONAPP_WORKING_DIRECTORY: 'video-processing'
   WEBAPP_WORKING_DIRECTORY: 'web-application'
   AZURE_RESOURCE_GROUP: 'volleyball-rg-1'              # set this to your Azure resource group
-  NODE_VERSION: '24.x'                # set this to the node version to use
+  NODE_VERSION: '20.x'                # set this to the node version to use
   ACR_NAME: 'volleyballacr'           # Azure Container Registry name
   ACR_IMAGE: 'volleyball-functions'   # Docker image name in ACR
 

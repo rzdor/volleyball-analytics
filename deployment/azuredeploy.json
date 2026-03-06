@@ -159,7 +159,7 @@
         "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('webAppPlanName'))]",
         "httpsOnly": true,
         "siteConfig": {
-          "nodeVersion": "~24",
+          "nodeVersion": "~20",
           "appSettings": [
             {
               "name": "APPINSIGHTS_INSTRUMENTATIONKEY",
@@ -175,7 +175,7 @@
             },
             {
               "name": "WEBSITE_NODE_DEFAULT_VERSION",
-              "value": "~24"
+              "value": "~20"
             },
             {
               "name": "SCM_DO_BUILD_DURING_DEPLOYMENT",
