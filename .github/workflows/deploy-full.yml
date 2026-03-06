@@ -36,6 +36,10 @@ on:
         description: 'Deploy EventGrid wiring'
         type: boolean
         default: true
+      azure_location:
+        description: 'Azure region for resource group'
+        type: string
+        default: 'eastus'
 
 env:
   AZURE_RESOURCE_GROUP: 'volleyball-rg-1'
@@ -69,6 +73,12 @@ jobs:
         client-id: ${{ secrets.AZURE_CLIENT_ID }}
         tenant-id: ${{ secrets.AZURE_TENANT_ID }}
         subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+    - name: Ensure resource group exists
+      run: |
+        az group create \
+          --name ${{ env.AZURE_RESOURCE_GROUP }} \
+          --location ${{ inputs.azure_location }}
 
     - name: Deploy ARM infrastructure template
       uses: azure/arm-deploy@v2
