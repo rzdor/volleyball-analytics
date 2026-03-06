@@ -59,7 +59,7 @@ jobs:
     if: ${{ inputs.deploy_infrastructure }}
     runs-on: ubuntu-latest
     environment:
-      name: 'Infrastructure'
+      name: 'Development'
     steps:
     - uses: actions/checkout@v4
 
