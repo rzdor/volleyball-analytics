@@ -26,9 +26,16 @@
     },
     "videoBlobContainerName": {
       "type": "string",
-      "defaultValue": "videos",
+      "defaultValue": "volleyball-videos",
       "metadata": {
-        "description": "Name of the blob container for storing video files."
+        "description": "Name of the blob container for storing video files (triggers EventGrid)."
+      }
+    },
+    "coordinationBlobContainerName": {
+      "type": "string",
+      "defaultValue": "coordination",
+      "metadata": {
+        "description": "Name of the blob container for function coordination logs and metadata."
       }
     }
   },
@@ -105,6 +112,17 @@
       }
     },
     {
+      "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+      "apiVersion": "2023-01-01",
+      "name": "[format('{0}/default/{1}', variables('storageAccountName'), parameters('coordinationBlobContainerName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts/blobServices', variables('storageAccountName'), 'default')]"
+      ],
+      "properties": {
+        "publicAccess": "None"
+      }
+    },
+    {
       "type": "Microsoft.ContainerRegistry/registries",
       "apiVersion": "2023-07-01",
       "name": "[variables('acrName')]",
@@ -162,6 +180,10 @@
             {
               "name": "SCM_DO_BUILD_DURING_DEPLOYMENT",
               "value": "false"
+            },
+            {
+              "name": "VIDEO_BLOB_CONTAINER",
+              "value": "[parameters('videoBlobContainerName')]"
             }
           ]
         }
@@ -270,6 +292,10 @@
             {
               "name": "VIDEO_BLOB_CONTAINER",
               "value": "[parameters('videoBlobContainerName')]"
+            },
+            {
+              "name": "COORDINATION_BLOB_CONTAINER",
+              "value": "[parameters('coordinationBlobContainerName')]"
             }
           ]
         }
@@ -320,6 +346,10 @@
     "videoBlobContainerName": {
       "type": "string",
       "value": "[parameters('videoBlobContainerName')]"
+    },
+    "coordinationBlobContainerName": {
+      "type": "string",
+      "value": "[parameters('coordinationBlobContainerName')]"
     },
     "appInsightsInstrumentationKey": {
       "type": "string",

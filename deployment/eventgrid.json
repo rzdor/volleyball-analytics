@@ -1,0 +1,80 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "projectName": {
+      "type": "string",
+      "defaultValue": "volleyball",
+      "metadata": {
+        "description": "Base name used to generate resource names. Must match the infrastructure template."
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Azure region. Must match the infrastructure deployment."
+      }
+    },
+    "videoBlobContainerName": {
+      "type": "string",
+      "defaultValue": "volleyball-videos",
+      "metadata": {
+        "description": "Name of the video blob container (must match infrastructure template)."
+      }
+    }
+  },
+  "variables": {
+    "storageAccountName": "[format('{0}storage', replace(parameters('projectName'), '-', ''))]",
+    "functionAppName": "[format('{0}-functions', parameters('projectName'))]",
+    "eventGridTopicName": "[format('{0}-storage-events', parameters('projectName'))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.EventGrid/systemTopics",
+      "apiVersion": "2022-06-15",
+      "name": "[variables('eventGridTopicName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "source": "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]",
+        "topicType": "Microsoft.Storage.StorageAccounts"
+      }
+    },
+    {
+      "type": "Microsoft.EventGrid/systemTopics/eventSubscriptions",
+      "apiVersion": "2022-06-15",
+      "name": "[format('{0}/trim-video-on-upload', variables('eventGridTopicName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.EventGrid/systemTopics', variables('eventGridTopicName'))]"
+      ],
+      "properties": {
+        "destination": {
+          "endpointType": "AzureFunction",
+          "properties": {
+            "resourceId": "[format('{0}/functions/trimVideoBlob', resourceId('Microsoft.Web/sites', variables('functionAppName')))]",
+            "maxEventsPerBatch": 1,
+            "preferredBatchSizeInKilobytes": 64
+          }
+        },
+        "filter": {
+          "includedEventTypes": [
+            "Microsoft.Storage.BlobCreated"
+          ],
+          "subjectBeginsWith": "[format('/blobServices/default/containers/{0}/blobs/input/', parameters('videoBlobContainerName'))]",
+          "subjectEndsWith": ""
+        },
+        "eventDeliverySchema": "EventGridSchema"
+      }
+    }
+  ],
+  "outputs": {
+    "eventGridTopicName": {
+      "type": "string",
+      "value": "[variables('eventGridTopicName')]"
+    },
+    "subscriptionName": {
+      "type": "string",
+      "value": "trim-video-on-upload"
+    }
+  }
+}

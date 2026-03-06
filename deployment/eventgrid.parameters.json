@@ -5,14 +5,8 @@
     "projectName": {
       "value": "volleyball"
     },
-    "acrSku": {
-      "value": "Basic"
-    },
     "videoBlobContainerName": {
       "value": "volleyball-videos"
-    },
-    "coordinationBlobContainerName": {
-      "value": "coordination"
     }
   }
 }

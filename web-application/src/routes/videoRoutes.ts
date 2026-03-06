@@ -10,8 +10,8 @@ const router = Router();
 
 const uploadsInputDir = path.resolve(process.cwd(), 'uploads/inputs');
 const MAX_VIDEO_BYTES = 100 * 1024 * 1024; // 100MB
-const BLOB_CONTAINER = process.env.VIDEO_BLOB_CONTAINER || 'videos';
-const BLOB_FOLDER = 'volleyball/video';
+const BLOB_CONTAINER = process.env.VIDEO_BLOB_CONTAINER || 'volleyball-videos';
+const BLOB_FOLDER = 'input';
 
 function getBlobServiceClient(): BlobServiceClient {
   const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
