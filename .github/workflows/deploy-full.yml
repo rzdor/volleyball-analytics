@@ -83,7 +83,7 @@ jobs:
       run: |
         if az group exists --name ${{ env.AZURE_RESOURCE_GROUP }} | grep -q true; then
           echo "Deleting resource group ${{ env.AZURE_RESOURCE_GROUP }}..."
-          az group delete --name ${{ env.AZURE_RESOURCE_GROUP }} --yes --no-wait=false
+          az group delete --name ${{ env.AZURE_RESOURCE_GROUP }} --yes
         else
           echo "Resource group does not exist, skipping."
         fi
