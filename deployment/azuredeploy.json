@@ -139,11 +139,14 @@
       "apiVersion": "2023-01-01",
       "name": "[variables('webAppPlanName')]",
       "location": "[parameters('location')]",
+      "kind": "linux",
       "sku": {
         "name": "B1",
         "tier": "Basic"
       },
-      "properties": {}
+      "properties": {
+        "reserved": true
+      }
     },
     {
       "type": "Microsoft.Web/sites",
@@ -159,7 +162,8 @@
         "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('webAppPlanName'))]",
         "httpsOnly": true,
         "siteConfig": {
-          "nodeVersion": "~20",
+          "linuxFxVersion": "NODE|20-lts",
+          "appCommandLine": "node dist/index.js",
           "appSettings": [
             {
               "name": "APPINSIGHTS_INSTRUMENTATIONKEY",
@@ -172,10 +176,6 @@
             {
               "name": "AZURE_STORAGE_CONNECTION_STRING",
               "value": "[format('DefaultEndpointsProtocol=https;AccountName={0};AccountKey={1};EndpointSuffix=core.windows.net', variables('storageAccountName'), listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2023-01-01').keys[0].value)]"
-            },
-            {
-              "name": "WEBSITE_NODE_DEFAULT_VERSION",
-              "value": "~20"
             },
             {
               "name": "SCM_DO_BUILD_DURING_DEPLOYMENT",

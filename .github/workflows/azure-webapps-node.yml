@@ -73,7 +73,7 @@ jobs:
       working-directory: ${{ env.WEBAPP_WORKING_DIRECTORY }}
 
     - name: Create deployment package
-      run: zip -rq ../web-app.zip package.json package-lock.json dist/ node_modules/ public/ uploads/ web.config
+      run: zip -rq ../web-app.zip package.json package-lock.json dist/ node_modules/ public/ uploads/
       working-directory: ${{ env.WEBAPP_WORKING_DIRECTORY }}
 
     - name: Upload web artifact for deployment job
