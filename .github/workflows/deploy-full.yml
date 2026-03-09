@@ -5,19 +5,17 @@
 #   2. Build and deploy web app + function app code
 #   3. Deploy EventGrid wiring (eventgrid.json)
 #
-# Requires manual approval via the 'Infrastructure' environment
+# Requires a single manual approval at the start via the 'Production' environment
 # to prevent accidental environment recreation.
 #
 # Prerequisites:
-#   1. Create GitHub environments: 'Infrastructure' (with required reviewers) and 'Development'
-#      - Go to Settings > Environments > New environment > 'Infrastructure'
+#   1. Create GitHub environment: 'Production' (with required reviewers)
+#      - Go to Settings > Environments > New environment > 'Production'
 #      - Enable "Required reviewers" and add approvers
 #   2. GitHub repository secrets:
 #      - AZURE_CLIENT_ID
 #      - AZURE_TENANT_ID
 #      - AZURE_SUBSCRIPTION_ID
-#   3. GitHub repository variables:
-#      - AZURE_RESOURCE_GROUP (e.g. volleyball-rg)
 
 name: Deploy Infrastructure & Code
 
@@ -61,13 +59,22 @@ permissions:
 
 jobs:
   # ──────────────────────────────────────────────
-  # Step 1: Deploy infrastructure (requires approval)
+  # Gate: Single manual approval before anything runs
+  # ──────────────────────────────────────────────
+  approve:
+    runs-on: ubuntu-latest
+    environment:
+      name: 'Production'
+    steps:
+    - run: echo "Deployment approved, proceeding..."
+
+  # ──────────────────────────────────────────────
+  # Step 1: Deploy infrastructure
   # ──────────────────────────────────────────────
   deploy_infrastructure:
     if: ${{ inputs.deploy_infrastructure }}
+    needs: approve
     runs-on: ubuntu-latest
-    environment:
-      name: 'Development'
     steps:
     - uses: actions/checkout@v4
 
@@ -106,11 +113,9 @@ jobs:
   # Step 2: Build and deploy application code
   # ──────────────────────────────────────────────
   build_and_deploy_web:
-    needs: deploy_infrastructure
-    if: ${{ always() && inputs.deploy_code && (needs.deploy_infrastructure.result == 'success' || needs.deploy_infrastructure.result == 'skipped') }}
+    needs: [approve, deploy_infrastructure]
+    if: ${{ always() && inputs.deploy_code && needs.approve.result == 'success' && (needs.deploy_infrastructure.result == 'success' || needs.deploy_infrastructure.result == 'skipped') }}
     runs-on: ubuntu-latest
-    environment:
-      name: 'Development'
     steps:
     - uses: actions/checkout@v4
 
@@ -150,11 +155,9 @@ jobs:
         package: web-app.zip
 
   build_and_deploy_functions:
-    if: ${{ always() && inputs.deploy_code && (needs.deploy_infrastructure.result == 'success' || needs.deploy_infrastructure.result == 'skipped') }}
-    needs: deploy_infrastructure
+    needs: [approve, deploy_infrastructure]
+    if: ${{ always() && inputs.deploy_code && needs.approve.result == 'success' && (needs.deploy_infrastructure.result == 'success' || needs.deploy_infrastructure.result == 'skipped') }}
     runs-on: ubuntu-latest
-    environment:
-      name: 'Development'
     steps:
     - uses: actions/checkout@v4
 
@@ -194,11 +197,9 @@ jobs:
   # Step 3: Deploy EventGrid wiring
   # ──────────────────────────────────────────────
   deploy_eventgrid:
-    if: ${{ always() && inputs.deploy_eventgrid && (needs.build_and_deploy_functions.result == 'success' || needs.build_and_deploy_functions.result == 'skipped') }}
     needs: [build_and_deploy_web, build_and_deploy_functions]
+    if: ${{ always() && inputs.deploy_eventgrid && (needs.build_and_deploy_functions.result == 'success' || needs.build_and_deploy_functions.result == 'skipped') }}
     runs-on: ubuntu-latest
-    environment:
-      name: 'Development'
     steps:
     - uses: actions/checkout@v4
 
