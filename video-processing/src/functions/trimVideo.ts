@@ -53,7 +53,7 @@ export async function trimVideo(event: EventGridEvent, context: InvocationContex
 
         const options: MotionDetectorOptions = {
             sampleFps: 2,
-            threshold: 0.02,
+            threshold: 0.01,
             minSegmentLength: 3,
             preRoll: 1,
             postRoll: 1,
