@@ -75,6 +75,8 @@ jobs:
     if: ${{ inputs.deploy_infrastructure }}
     needs: approve
     runs-on: ubuntu-latest
+    environment:
+      name: 'Development'
     steps:
     - uses: actions/checkout@v4
 
@@ -116,6 +118,8 @@ jobs:
     needs: [approve, deploy_infrastructure]
     if: ${{ always() && inputs.deploy_code && needs.approve.result == 'success' && (needs.deploy_infrastructure.result == 'success' || needs.deploy_infrastructure.result == 'skipped') }}
     runs-on: ubuntu-latest
+    environment:
+      name: 'Development'
     steps:
     - uses: actions/checkout@v4
 
@@ -158,6 +162,8 @@ jobs:
     needs: [approve, deploy_infrastructure]
     if: ${{ always() && inputs.deploy_code && needs.approve.result == 'success' && (needs.deploy_infrastructure.result == 'success' || needs.deploy_infrastructure.result == 'skipped') }}
     runs-on: ubuntu-latest
+    environment:
+      name: 'Development'
     steps:
     - uses: actions/checkout@v4
 
@@ -200,6 +206,8 @@ jobs:
     needs: [build_and_deploy_web, build_and_deploy_functions]
     if: ${{ always() && inputs.deploy_eventgrid && (needs.build_and_deploy_functions.result == 'success' || needs.build_and_deploy_functions.result == 'skipped') }}
     runs-on: ubuntu-latest
+    environment:
+      name: 'Development'
     steps:
     - uses: actions/checkout@v4
 
