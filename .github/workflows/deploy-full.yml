@@ -5,12 +5,12 @@
 #   2. Build and deploy web app + function app code
 #   3. Deploy EventGrid wiring (eventgrid.json)
 #
-# Requires a single manual approval at the start via the 'Production' environment
+# Requires a single manual approval at the start via the 'Development' environment
 # to prevent accidental environment recreation.
 #
 # Prerequisites:
-#   1. Create GitHub environment: 'Production' (with required reviewers)
-#      - Go to Settings > Environments > New environment > 'Production'
+#   1. Create GitHub environment: 'Development' (with required reviewers)
+#      - Go to Settings > Environments > New environment > 'Development'
 #      - Enable "Required reviewers" and add approvers
 #   2. GitHub repository secrets:
 #      - AZURE_CLIENT_ID
