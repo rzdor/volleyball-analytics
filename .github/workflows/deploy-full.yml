@@ -64,7 +64,7 @@ jobs:
   approve:
     runs-on: ubuntu-latest
     environment:
-      name: 'Production'
+      name: 'Development'
     steps:
     - run: echo "Deployment approved, proceeding..."
 
