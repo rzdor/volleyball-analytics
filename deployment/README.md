@@ -24,6 +24,7 @@ Creates all Azure resources needed to run the project.
 | Storage Account | Standard_LRS | Blob storage |
 | Blob Container (`volleyball-videos`) | — | Video file uploads (input/) and processed output |
 | Blob Container (`coordination`) | — | Function coordination logs and metadata |
+| Blob Container (`detections`) | — | Player detection results (JSON) |
 | Azure Container Registry | Basic | Hosts Function App Docker images |
 | App Service Plan (Functions) | Basic B1, Linux | Hosts the containerized Function App |
 | Function App | Container (Docker) | Video processing with ffmpeg (`video-processing/`) |
@@ -38,7 +39,8 @@ code is running** — EventGrid validates the function endpoint exists.
 | Resource | Purpose |
 |---|---|
 | EventGrid System Topic | Captures blob events from the storage account |
-| EventGrid Subscription | Routes `BlobCreated` in `volleyball-videos/input/` to `trimVideoBlob` function |
+| EventGrid Subscription (`trim-video-on-upload`) | Routes `BlobCreated` in `volleyball-videos/input/` to `trimVideoBlob` function |
+| EventGrid Subscription (`detect-players-on-processed`) | Routes `BlobCreated` in `volleyball-videos/processed/` to `detectPlayersBlob` function |
 
 ## Prerequisites
 
@@ -87,6 +89,7 @@ az deployment group create \
 | `acrSku` | `Basic` | ACR tier (Basic/Standard/Premium) |
 | `videoBlobContainerName` | `volleyball-videos` | Blob container for video storage |
 | `coordinationBlobContainerName` | `coordination` | Blob container for logs/metadata |
+| `detectionsBlobContainerName` | `detections` | Blob container for detection results |
 
 ### eventgrid.json
 

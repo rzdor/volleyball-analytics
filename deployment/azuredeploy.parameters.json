@@ -13,6 +13,9 @@
     },
     "coordinationBlobContainerName": {
       "value": "coordination"
+    },
+    "detectionsBlobContainerName": {
+      "value": "detections"
     }
   }
 }

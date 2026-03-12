@@ -37,6 +37,13 @@
       "metadata": {
         "description": "Name of the blob container for function coordination logs and metadata."
       }
+    },
+    "detectionsBlobContainerName": {
+      "type": "string",
+      "defaultValue": "detections",
+      "metadata": {
+        "description": "Name of the blob container for player detection results (JSON)."
+      }
     }
   },
   "variables": {
@@ -115,6 +122,17 @@
       "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
       "apiVersion": "2023-01-01",
       "name": "[format('{0}/default/{1}', variables('storageAccountName'), parameters('coordinationBlobContainerName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts/blobServices', variables('storageAccountName'), 'default')]"
+      ],
+      "properties": {
+        "publicAccess": "None"
+      }
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+      "apiVersion": "2023-01-01",
+      "name": "[format('{0}/default/{1}', variables('storageAccountName'), parameters('detectionsBlobContainerName'))]",
       "dependsOn": [
         "[resourceId('Microsoft.Storage/storageAccounts/blobServices', variables('storageAccountName'), 'default')]"
       ],
@@ -296,6 +314,10 @@
             {
               "name": "COORDINATION_BLOB_CONTAINER",
               "value": "[parameters('coordinationBlobContainerName')]"
+            },
+            {
+              "name": "DETECTIONS_BLOB_CONTAINER",
+              "value": "[parameters('detectionsBlobContainerName')]"
             }
           ]
         }
@@ -350,6 +372,10 @@
     "coordinationBlobContainerName": {
       "type": "string",
       "value": "[parameters('coordinationBlobContainerName')]"
+    },
+    "detectionsBlobContainerName": {
+      "type": "string",
+      "value": "[parameters('detectionsBlobContainerName')]"
     },
     "appInsightsInstrumentationKey": {
       "type": "string",

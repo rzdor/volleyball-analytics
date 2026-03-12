@@ -7,7 +7,7 @@ import {
   generateBlobSASQueryParameters,
 } from '@azure/storage-blob';
 
-type VideoKind = 'input' | 'output';
+type VideoKind = 'input' | 'output' | 'detection';
 
 export interface StoredVideo {
   name: string;
@@ -23,6 +23,7 @@ interface StorageOptions {
   containerName?: string;
   inputFolder?: string;
   outputFolder?: string;
+  detectionFolder?: string;
 }
 
 function ensureDir(dir: string): void {
@@ -40,6 +41,8 @@ function guessContentType(filename: string): string {
       return 'video/quicktime';
     case '.avi':
       return 'video/x-msvideo';
+    case '.json':
+      return 'application/json';
     default:
       return 'video/mp4';
   }
@@ -73,8 +76,10 @@ export class VideoStorage {
   private readonly baseDir: string;
   private readonly localInputDir: string;
   private readonly localOutputDir: string;
+  private readonly localDetectionDir: string;
   private readonly inputFolder: string;
   private readonly outputFolder: string;
+  private readonly detectionFolder: string;
   private readonly containerClient?: ReturnType<BlobServiceClient['getContainerClient']>;
   private readonly sharedKey?: StorageSharedKeyCredential;
   private readonly containerReady?: Promise<void>;
@@ -83,11 +88,14 @@ export class VideoStorage {
     this.baseDir = options.baseDir ?? path.join(__dirname, '../../uploads');
     this.localInputDir = path.join(this.baseDir, 'inputs');
     this.localOutputDir = path.join(this.baseDir, 'processed');
+    this.localDetectionDir = path.join(this.baseDir, 'detections');
     ensureDir(this.localInputDir);
     ensureDir(this.localOutputDir);
+    ensureDir(this.localDetectionDir);
 
     this.inputFolder = options.inputFolder ?? process.env.AZURE_STORAGE_INPUT_FOLDER ?? 'inputs';
     this.outputFolder = options.outputFolder ?? process.env.AZURE_STORAGE_OUTPUT_FOLDER ?? 'processed';
+    this.detectionFolder = options.detectionFolder ?? process.env.AZURE_STORAGE_DETECTION_FOLDER ?? 'detections';
 
     const connectionString = options.connectionString ?? process.env.AZURE_STORAGE_CONNECTION_STRING;
     const containerName = options.containerName ?? process.env.AZURE_STORAGE_CONTAINER ?? 'volleyball-videos';
@@ -108,6 +116,10 @@ export class VideoStorage {
     return this.localOutputDir;
   }
 
+  getLocalDetectionDir(): string {
+    return this.localDetectionDir;
+  }
+
   async saveInput(localPath: string, preferredName?: string): Promise<StoredVideo> {
     return this.save(localPath, preferredName, 'input');
   }
@@ -116,12 +128,20 @@ export class VideoStorage {
     return this.save(localPath, preferredName, 'output');
   }
 
+  async saveDetection(localPath: string, preferredName?: string): Promise<StoredVideo> {
+    return this.save(localPath, preferredName, 'detection');
+  }
+
   async listInputs(): Promise<StoredVideo[]> {
     return this.list('input');
   }
 
   async listOutputs(): Promise<StoredVideo[]> {
     return this.list('output');
+  }
+
+  async listDetections(): Promise<StoredVideo[]> {
+    return this.list('detection');
   }
 
   async outputExists(filename: string): Promise<boolean> {
@@ -133,15 +153,19 @@ export class VideoStorage {
   }
 
   private getLocalDir(kind: VideoKind): string {
-    return kind === 'input' ? this.localInputDir : this.localOutputDir;
+    if (kind === 'input') return this.localInputDir;
+    if (kind === 'detection') return this.localDetectionDir;
+    return this.localOutputDir;
   }
 
   private getPrefix(kind: VideoKind): string {
-    return kind === 'input' ? this.inputFolder : this.outputFolder;
+    if (kind === 'input') return this.inputFolder;
+    if (kind === 'detection') return this.detectionFolder;
+    return this.outputFolder;
   }
 
   private buildLocalUrl(kind: VideoKind, filename: string): string {
-    const folder = kind === 'input' ? 'inputs' : 'processed';
+    const folder = kind === 'input' ? 'inputs' : kind === 'detection' ? 'detections' : 'processed';
     return `/uploads/${folder}/${filename}`;
   }
 
