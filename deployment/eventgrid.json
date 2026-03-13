@@ -63,6 +63,10 @@
           "subjectBeginsWith": "[format('/blobServices/default/containers/{0}/blobs/input/', parameters('videoBlobContainerName'))]",
           "subjectEndsWith": ""
         },
+        "retryPolicy": {
+          "maxDeliveryAttempts": 1,
+          "eventTimeToLiveInMinutes": 1440
+        },
         "eventDeliverySchema": "EventGridSchema"
       }
     },
@@ -88,6 +92,10 @@
           ],
           "subjectBeginsWith": "[format('/blobServices/default/containers/{0}/blobs/processed/', parameters('videoBlobContainerName'))]",
           "subjectEndsWith": ""
+        },
+        "retryPolicy": {
+          "maxDeliveryAttempts": 1,
+          "eventTimeToLiveInMinutes": 1440
         },
         "eventDeliverySchema": "EventGridSchema"
       }

@@ -39,8 +39,8 @@ code is running** — EventGrid validates the function endpoint exists.
 | Resource | Purpose |
 |---|---|
 | EventGrid System Topic | Captures blob events from the storage account |
-| EventGrid Subscription (`trim-video-on-upload`) | Routes `BlobCreated` in `volleyball-videos/input/` to `trimVideoBlob` function |
-| EventGrid Subscription (`detect-players-on-processed`) | Routes `BlobCreated` in `volleyball-videos/processed/` to `detectPlayersBlob` function |
+| EventGrid Subscription (`trim-video-on-upload`) | Routes `BlobCreated` in `volleyball-videos/input/` to `trimVideoBlob` function with a single delivery attempt (`maxDeliveryAttempts: 1`) |
+| EventGrid Subscription (`detect-players-on-processed`) | Routes `BlobCreated` in `volleyball-videos/processed/` to `detectPlayersBlob` function with a single delivery attempt (`maxDeliveryAttempts: 1`) |
 
 ## Prerequisites
 
