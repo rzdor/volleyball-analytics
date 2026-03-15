@@ -43,7 +43,7 @@
     {
       "type": "Microsoft.EventGrid/systemTopics/eventSubscriptions",
       "apiVersion": "2022-06-15",
-      "name": "[format('{0}/trim-video-on-upload', variables('eventGridTopicName'))]",
+      "name": "[format('{0}/queue-upload-on-input', variables('eventGridTopicName'))]",
       "dependsOn": [
         "[resourceId('Microsoft.EventGrid/systemTopics', variables('eventGridTopicName'))]"
       ],
@@ -51,7 +51,7 @@
         "destination": {
           "endpointType": "AzureFunction",
           "properties": {
-            "resourceId": "[format('{0}/functions/trimVideoBlob', resourceId('Microsoft.Web/sites', variables('functionAppName')))]",
+            "resourceId": "[format('{0}/functions/queueVideoUploadBlob', resourceId('Microsoft.Web/sites', variables('functionAppName')))]",
             "maxEventsPerBatch": 1,
             "preferredBatchSizeInKilobytes": 64
           }
@@ -69,36 +69,6 @@
         },
         "eventDeliverySchema": "EventGridSchema"
       }
-    },
-    {
-      "type": "Microsoft.EventGrid/systemTopics/eventSubscriptions",
-      "apiVersion": "2022-06-15",
-      "name": "[format('{0}/detect-players-on-processed', variables('eventGridTopicName'))]",
-      "dependsOn": [
-        "[resourceId('Microsoft.EventGrid/systemTopics', variables('eventGridTopicName'))]"
-      ],
-      "properties": {
-        "destination": {
-          "endpointType": "AzureFunction",
-          "properties": {
-            "resourceId": "[format('{0}/functions/detectPlayersBlob', resourceId('Microsoft.Web/sites', variables('functionAppName')))]",
-            "maxEventsPerBatch": 1,
-            "preferredBatchSizeInKilobytes": 64
-          }
-        },
-        "filter": {
-          "includedEventTypes": [
-            "Microsoft.Storage.BlobCreated"
-          ],
-          "subjectBeginsWith": "[format('/blobServices/default/containers/{0}/blobs/processed/', parameters('videoBlobContainerName'))]",
-          "subjectEndsWith": ""
-        },
-        "retryPolicy": {
-          "maxDeliveryAttempts": 1,
-          "eventTimeToLiveInMinutes": 1440
-        },
-        "eventDeliverySchema": "EventGridSchema"
-      }
     }
   ],
   "outputs": {
@@ -106,13 +76,9 @@
       "type": "string",
       "value": "[variables('eventGridTopicName')]"
     },
-    "trimVideoSubscriptionName": {
+    "queueUploadSubscriptionName": {
       "type": "string",
-      "value": "trim-video-on-upload"
-    },
-    "detectPlayersSubscriptionName": {
-      "type": "string",
-      "value": "detect-players-on-processed"
+      "value": "queue-upload-on-input"
     }
   }
 }

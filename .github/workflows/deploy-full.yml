@@ -2,7 +2,7 @@
 #
 # Runs the complete deployment sequence:
 #   1. Deploy ARM infrastructure template (azuredeploy.json)
-#   2. Build and deploy web app + function app code
+#   2. Build and deploy web app + function app/container worker code
 #   3. Deploy EventGrid wiring (eventgrid.json)
 #
 # Requires a single manual approval at the start via the 'Development' environment
@@ -47,11 +47,13 @@ env:
   AZURE_RESOURCE_GROUP: 'volleyball-rg-1'
   AZURE_WEBAPP_NAME: 'volleyball-web'
   AZURE_FUNCTIONAPP_NAME: 'volleyball-functions'
+  AZURE_CONTAINERAPP_NAME: 'volleyball-video-worker'
   WEBAPP_WORKING_DIRECTORY: 'web-application'
   FUNCTIONAPP_WORKING_DIRECTORY: 'video-processing'
   NODE_VERSION: '20.x'
   ACR_NAME: 'volleyballacr'
-  ACR_IMAGE: 'volleyball-functions'
+  ACR_FUNCTION_IMAGE: 'volleyball-functions'
+  ACR_WORKER_IMAGE: 'volleyball-worker'
 
 permissions:
   id-token: write
@@ -187,17 +189,34 @@ jobs:
         tenant-id: ${{ secrets.AZURE_TENANT_ID }}
         subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-    - name: Build and push Docker image to ACR
+    - name: Build and push Function App image to ACR
       run: |
         az acr build \
           --registry ${{ env.ACR_NAME }} \
-          --image ${{ env.ACR_IMAGE }}:${{ github.sha }} \
-          --image ${{ env.ACR_IMAGE }}:latest \
+          --image ${{ env.ACR_FUNCTION_IMAGE }}:${{ github.sha }} \
+          --image ${{ env.ACR_FUNCTION_IMAGE }}:latest \
+          .
+      working-directory: ${{ env.FUNCTIONAPP_WORKING_DIRECTORY }}
+
+    - name: Build and push worker image to ACR
+      run: |
+        az acr build \
+          --registry ${{ env.ACR_NAME }} \
+          --image ${{ env.ACR_WORKER_IMAGE }}:${{ github.sha }} \
+          --image ${{ env.ACR_WORKER_IMAGE }}:latest \
+          --file Dockerfile.worker \
           .
       working-directory: ${{ env.FUNCTIONAPP_WORKING_DIRECTORY }}
 
     - name: Restart Function App to pull new image
       run: az webapp restart --name ${{ env.AZURE_FUNCTIONAPP_NAME }} --resource-group ${{ env.AZURE_RESOURCE_GROUP }}
+
+    - name: Update Container App worker image
+      run: |
+        az containerapp update \
+          --name ${{ env.AZURE_CONTAINERAPP_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --image ${{ env.ACR_NAME }}.azurecr.io/${{ env.ACR_WORKER_IMAGE }}:${{ github.sha }}
 
   # ──────────────────────────────────────────────
   # Step 3: Deploy EventGrid wiring

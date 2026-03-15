@@ -16,6 +16,12 @@
     },
     "detectionsBlobContainerName": {
       "value": "detections"
+    },
+    "videoRecordsTableName": {
+      "value": "videoprocessingrecords"
+    },
+    "processingQueueName": {
+      "value": "video-processing-jobs"
     }
   }
 }

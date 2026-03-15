@@ -23,6 +23,7 @@ export interface TrimPipelineParams {
   motionOptions?: MotionDetectorOptions;
   maxBytes?: number;
   outputFilename?: string;
+  persistInput?: boolean;
 }
 
 export interface TrimPipelineResult {
@@ -37,6 +38,7 @@ export async function runTrimPipeline(params: TrimPipelineParams): Promise<TrimP
   const storage = params.storage ?? getDefaultStorage();
   const maxBytesLimit = params.maxBytes ?? MAX_REMOTE_VIDEO_BYTES;
   const motionOptions = params.motionOptions;
+  const persistInput = params.persistInput ?? true;
 
   let inputPath = params.videoPath;
   let downloadedPath: string | undefined;
@@ -52,7 +54,9 @@ export async function runTrimPipeline(params: TrimPipelineParams): Promise<TrimP
   }
 
   try {
-    const storedInput = await storage.saveInput(inputPath, path.basename(inputPath));
+    const storedInput = persistInput
+      ? await storage.saveInput(inputPath, path.basename(inputPath))
+      : undefined;
     const segments = await detectMotionSegments(inputPath, motionOptions);
 
     if (segments.length === 0) {

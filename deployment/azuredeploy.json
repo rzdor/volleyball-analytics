@@ -19,7 +19,11 @@
     "acrSku": {
       "type": "string",
       "defaultValue": "Basic",
-      "allowedValues": ["Basic", "Standard", "Premium"],
+      "allowedValues": [
+        "Basic",
+        "Standard",
+        "Premium"
+      ],
       "metadata": {
         "description": "SKU tier for the Azure Container Registry."
       }
@@ -44,6 +48,20 @@
       "metadata": {
         "description": "Name of the blob container for player detection results (JSON)."
       }
+    },
+    "videoRecordsTableName": {
+      "type": "string",
+      "defaultValue": "videoprocessingrecords",
+      "metadata": {
+        "description": "Azure Table Storage table used to track uploaded video processing state."
+      }
+    },
+    "processingQueueName": {
+      "type": "string",
+      "defaultValue": "video-processing-jobs",
+      "metadata": {
+        "description": "Azure Queue Storage queue consumed by the video-processing worker."
+      }
     }
   },
   "variables": {
@@ -55,7 +73,10 @@
     "acrName": "[format('{0}acr', replace(parameters('projectName'), '-', ''))]",
     "appInsightsName": "[format('{0}-insights', parameters('projectName'))]",
     "logAnalyticsName": "[format('{0}-logs', parameters('projectName'))]",
-    "functionAppImageName": "[format('{0}acr.azurecr.io/{0}-functions:latest', replace(parameters('projectName'), '-', ''))]"
+    "functionAppImageName": "[format('{0}acr.azurecr.io/{0}-functions:latest', replace(parameters('projectName'), '-', ''))]",
+    "workerImageName": "[format('{0}acr.azurecr.io/{0}-worker:latest', replace(parameters('projectName'), '-', ''))]",
+    "containerAppEnvironmentName": "[format('{0}-cae', parameters('projectName'))]",
+    "workerContainerAppName": "[format('{0}-video-worker', parameters('projectName'))]"
   },
   "resources": [
     {
@@ -108,6 +129,38 @@
       ]
     },
     {
+      "type": "Microsoft.Storage/storageAccounts/tableServices",
+      "apiVersion": "2023-01-01",
+      "name": "[format('{0}/default', variables('storageAccountName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/tableServices/tables",
+      "apiVersion": "2023-01-01",
+      "name": "[format('{0}/default/{1}', variables('storageAccountName'), parameters('videoRecordsTableName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts/tableServices', variables('storageAccountName'), 'default')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/queueServices",
+      "apiVersion": "2023-01-01",
+      "name": "[format('{0}/default', variables('storageAccountName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/queueServices/queues",
+      "apiVersion": "2023-01-01",
+      "name": "[format('{0}/default/{1}', variables('storageAccountName'), parameters('processingQueueName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts/queueServices', variables('storageAccountName'), 'default')]"
+      ]
+    },
+    {
       "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
       "apiVersion": "2023-01-01",
       "name": "[format('{0}/default/{1}', variables('storageAccountName'), parameters('videoBlobContainerName'))]",
@@ -150,6 +203,24 @@
       },
       "properties": {
         "adminUserEnabled": true
+      }
+    },
+    {
+      "type": "Microsoft.App/managedEnvironments",
+      "apiVersion": "2024-03-01",
+      "name": "[variables('containerAppEnvironmentName')]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))]"
+      ],
+      "properties": {
+        "appLogsConfiguration": {
+          "destination": "log-analytics",
+          "logAnalyticsConfiguration": {
+            "customerId": "[reference(resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName')), '2022-10-01').customerId]",
+            "sharedKey": "[listKeys(resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName')), '2022-10-01').primarySharedKey]"
+          }
+        }
       }
     },
     {
@@ -318,6 +389,14 @@
             {
               "name": "DETECTIONS_BLOB_CONTAINER",
               "value": "[parameters('detectionsBlobContainerName')]"
+            },
+            {
+              "name": "VIDEO_RECORDS_TABLE_NAME",
+              "value": "[parameters('videoRecordsTableName')]"
+            },
+            {
+              "name": "VIDEO_PROCESSING_QUEUE_NAME",
+              "value": "[parameters('processingQueueName')]"
             }
           ]
         }
@@ -348,6 +427,101 @@
         },
         "failedRequestsTracing": {
           "enabled": true
+        }
+      }
+    },
+    {
+      "type": "Microsoft.App/containerApps",
+      "apiVersion": "2024-03-01",
+      "name": "[variables('workerContainerAppName')]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.App/managedEnvironments', variables('containerAppEnvironmentName'))]",
+        "[resourceId('Microsoft.ContainerRegistry/registries', variables('acrName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+      ],
+      "properties": {
+        "managedEnvironmentId": "[resourceId('Microsoft.App/managedEnvironments', variables('containerAppEnvironmentName'))]",
+        "configuration": {
+          "activeRevisionsMode": "Single",
+          "secrets": [
+            {
+              "name": "acr-password",
+              "value": "[listCredentials(resourceId('Microsoft.ContainerRegistry/registries', variables('acrName')), '2023-07-01').passwords[0].value]"
+            },
+            {
+              "name": "storage-connection-string",
+              "value": "[format('DefaultEndpointsProtocol=https;AccountName={0};AccountKey={1};EndpointSuffix=core.windows.net', variables('storageAccountName'), listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2023-01-01').keys[0].value)]"
+            }
+          ],
+          "registries": [
+            {
+              "server": "[format('{0}.azurecr.io', variables('acrName'))]",
+              "username": "[listCredentials(resourceId('Microsoft.ContainerRegistry/registries', variables('acrName')), '2023-07-01').username]",
+              "passwordSecretRef": "acr-password"
+            }
+          ]
+        },
+        "template": {
+          "containers": [
+            {
+              "name": "video-worker",
+              "image": "[variables('workerImageName')]",
+              "env": [
+                {
+                  "name": "AZURE_STORAGE_CONNECTION_STRING",
+                  "secretRef": "storage-connection-string"
+                },
+                {
+                  "name": "VIDEO_RECORDS_TABLE_NAME",
+                  "value": "[parameters('videoRecordsTableName')]"
+                },
+                {
+                  "name": "VIDEO_PROCESSING_QUEUE_NAME",
+                  "value": "[parameters('processingQueueName')]"
+                },
+                {
+                  "name": "AZURE_STORAGE_INPUT_FOLDER",
+                  "value": "input"
+                },
+                {
+                  "name": "AZURE_STORAGE_OUTPUT_FOLDER",
+                  "value": "processed"
+                },
+                {
+                  "name": "AZURE_STORAGE_DETECTION_FOLDER",
+                  "value": "detections"
+                },
+                {
+                  "name": "AZURE_STORAGE_CONTAINER",
+                  "value": "[parameters('videoBlobContainerName')]"
+                }
+              ],
+              "resources": {
+                "cpu": 1,
+                "memory": "2Gi"
+              }
+            }
+          ],
+          "scale": {
+            "minReplicas": 0,
+            "maxReplicas": 3,
+            "rules": [
+              {
+                "name": "processing-queue",
+                "azureQueue": {
+                  "queueName": "[parameters('processingQueueName')]",
+                  "queueLength": 1,
+                  "auth": [
+                    {
+                      "secretRef": "storage-connection-string",
+                      "triggerParameter": "connection"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
         }
       }
     }
@@ -388,6 +562,18 @@
     "acrName": {
       "type": "string",
       "value": "[variables('acrName')]"
+    },
+    "videoRecordsTableName": {
+      "type": "string",
+      "value": "[parameters('videoRecordsTableName')]"
+    },
+    "processingQueueName": {
+      "type": "string",
+      "value": "[parameters('processingQueueName')]"
+    },
+    "workerContainerAppName": {
+      "type": "string",
+      "value": "[variables('workerContainerAppName')]"
     }
   }
 }
