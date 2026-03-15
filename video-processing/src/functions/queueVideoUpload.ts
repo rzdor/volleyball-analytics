@@ -1,4 +1,5 @@
 import { app, EventGridEvent, InvocationContext } from '@azure/functions';
+import { randomUUID } from 'crypto';
 import { parseBlobUrl } from '../services/blobUtils';
 import { getProcessingQueue } from '../services/processingQueue';
 import { getVideoRecordStore } from '../services/videoRecordStore';
@@ -26,9 +27,11 @@ export async function queueVideoUploadHandler(event: EventGridEvent, context: In
     blobUrl,
   });
 
+  const trimJobToken = randomUUID();
   const trimJob: ProcessingJobMessage = {
     version: 1,
     jobType: 'trim',
+    jobToken: trimJobToken,
     recordId: record.recordId,
     sourceContainer: record.sourceContainer,
     sourceBlobName: record.sourceBlobName,
@@ -37,7 +40,7 @@ export async function queueVideoUploadHandler(event: EventGridEvent, context: In
   if (!created) {
     if (record.status === 'uploaded' && record.currentStage === 'ingest') {
       await queue.enqueue(trimJob);
-      await recordStore.markQueued(record.recordId, 'trim');
+      await recordStore.markQueued(record.recordId, 'trim', 0, trimJobToken);
 
       context.log('queueVideoUpload recovered unqueued record and queued trim job', {
         recordId: record.recordId,
@@ -56,7 +59,7 @@ export async function queueVideoUploadHandler(event: EventGridEvent, context: In
   }
 
   await queue.enqueue(trimJob);
-  await recordStore.markQueued(record.recordId, 'trim');
+  await recordStore.markQueued(record.recordId, 'trim', 0, trimJobToken);
 
   context.log('queueVideoUpload queued trim job', {
     recordId: record.recordId,

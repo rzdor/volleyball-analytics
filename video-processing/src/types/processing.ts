@@ -18,6 +18,7 @@ export interface UploadedVideoDescriptor {
 export interface ProcessingJobMessage {
   version: 1;
   jobType: ProcessingJobType;
+  jobToken: string;
   recordId: string;
   sourceContainer: string;
   sourceBlobName: string;
@@ -39,6 +40,22 @@ export interface VideoRecordEntity {
   processingStartedAt?: string;
   completedAt?: string;
   failedAt?: string;
+  trimQueuedAt?: string;
+  trimStartedAt?: string;
+  trimCompletedAt?: string;
+  trimFailedAt?: string;
+  trimDurationMs?: number;
+  trimRetryCount?: number;
+  trimErrorMessage?: string;
+  detectQueuedAt?: string;
+  detectStartedAt?: string;
+  detectCompletedAt?: string;
+  detectFailedAt?: string;
+  detectDurationMs?: number;
+  detectRetryCount?: number;
+  detectErrorMessage?: string;
+  trimJobToken?: string;
+  detectJobToken?: string;
   lastJobType?: ProcessingJobType;
   processedBlobName?: string;
   processedBlobUrl?: string;
@@ -68,6 +85,8 @@ export function createUploadedVideoEntity(upload: UploadedVideoDescriptor): Vide
     currentStage: 'ingest',
     uploadedAt: now,
     updatedAt: now,
+    trimRetryCount: 0,
+    detectRetryCount: 0,
   };
 }
 

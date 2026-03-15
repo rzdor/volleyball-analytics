@@ -29,7 +29,7 @@ function sleep(ms: number): Promise<void> {
 function parseJobMessage(messageText: string): ProcessingJobMessage {
   const parsed = JSON.parse(messageText) as Partial<ProcessingJobMessage>;
 
-  if (parsed.version !== 1 || !parsed.jobType || !parsed.recordId || !parsed.sourceContainer || !parsed.sourceBlobName) {
+  if (parsed.version !== 1 || !parsed.jobType || !parsed.jobToken || !parsed.recordId || !parsed.sourceContainer || !parsed.sourceBlobName) {
     throw new Error(`Invalid queue message payload: ${messageText}`);
   }
 
@@ -50,8 +50,29 @@ function getErrorMessage(error: unknown): string {
   return raw.length > 2000 ? `${raw.slice(0, 1997)}...` : raw;
 }
 
-async function runTrimJob(job: ProcessingJobMessage): Promise<void> {
-  await recordStore.markProcessing(job.recordId, 'trim');
+function getRetryCount(message: DequeuedMessageItem): number {
+  const dequeueCount = Number(message.dequeueCount ?? 1);
+  if (!Number.isFinite(dequeueCount) || dequeueCount <= 1) {
+    return 0;
+  }
+
+  return dequeueCount - 1;
+}
+
+function isRedelivery(message: DequeuedMessageItem): boolean {
+  return getRetryCount(message) > 0;
+}
+
+function getStageJobToken(jobType: ProcessingJobMessage['jobType'], record: Awaited<ReturnType<typeof recordStore.get>>): string | undefined {
+  if (!record) {
+    return undefined;
+  }
+
+  return jobType === 'trim' ? record.trimJobToken : record.detectJobToken;
+}
+
+async function runTrimJob(job: ProcessingJobMessage, retryCount: number): Promise<void> {
+  const trimStartedAt = await recordStore.markProcessing(job.recordId, 'trim', retryCount);
 
   const tempInputPath = getTempVideoPath('trim', job.sourceBlobName);
 
@@ -69,14 +90,10 @@ async function runTrimJob(job: ProcessingJobMessage): Promise<void> {
       outputFilename: `${sourceBaseName}-trimmed.mp4`,
     });
 
-    await recordStore.update(job.recordId, {
-      processedBlobName: `processed/${trimResult.storedOutput.name}`,
-      processedBlobUrl: trimResult.storedOutput.url,
-    });
-
     const detectJob: ProcessingJobMessage = {
       version: 1,
       jobType: 'detect',
+      jobToken: randomUUID(),
       recordId: job.recordId,
       sourceContainer: job.sourceContainer,
       sourceBlobName: job.sourceBlobName,
@@ -84,7 +101,13 @@ async function runTrimJob(job: ProcessingJobMessage): Promise<void> {
     };
 
     await detectQueue.enqueue(detectJob);
-    await recordStore.markQueued(job.recordId, 'detect');
+    await recordStore.markTrimCompletedAndQueueDetect(
+      job.recordId,
+      `processed/${trimResult.storedOutput.name}`,
+      trimResult.storedOutput.url,
+      trimStartedAt,
+      detectJob.jobToken
+    );
   } finally {
     if (fs.existsSync(tempInputPath)) {
       fs.unlinkSync(tempInputPath);
@@ -92,8 +115,8 @@ async function runTrimJob(job: ProcessingJobMessage): Promise<void> {
   }
 }
 
-async function runDetectJob(job: ProcessingJobMessage): Promise<void> {
-  await recordStore.markProcessing(job.recordId, 'detect');
+async function runDetectJob(job: ProcessingJobMessage, retryCount: number): Promise<void> {
+  const detectStartedAt = await recordStore.markProcessing(job.recordId, 'detect', retryCount);
 
   const tempInputPath = getTempVideoPath('detect', job.processedBlobName!);
 
@@ -111,15 +134,12 @@ async function runDetectJob(job: ProcessingJobMessage): Promise<void> {
 
     const storedDetection = await storage.saveDetection(detectionJsonPath, detectionFilename);
 
-    await recordStore.update(job.recordId, {
-      status: 'completed',
-      currentStage: 'completed',
-      completedAt: new Date().toISOString(),
-      detectionBlobName: `detections/${storedDetection.name}`,
-      detectionBlobUrl: storedDetection.url,
-      errorMessage: '',
-      failedAt: '',
-    });
+    await recordStore.markDetectCompleted(
+      job.recordId,
+      `detections/${storedDetection.name}`,
+      storedDetection.url,
+      detectStartedAt
+    );
 
     if (fs.existsSync(detectionJsonPath)) {
       fs.unlinkSync(detectionJsonPath);
@@ -139,10 +159,19 @@ async function handleMessage(message: DequeuedMessageItem, queueName: Processing
     const job = parseJobMessage(message.messageText);
     jobTypeForFailure = job.jobType;
     recordIdForFailure = job.recordId;
+    const retryCount = getRetryCount(message);
     const record = await recordStore.get(job.recordId);
 
     if (!record) {
       throw new Error(`No video record found for job ${job.recordId}`);
+    }
+
+    if (job.jobToken !== getStageJobToken(job.jobType, record)) {
+      console.log('[worker] Skipping stale stage message', {
+        recordId: job.recordId,
+        jobType: job.jobType,
+      });
+      return;
     }
 
     if (job.jobType === 'trim' && (record.processedBlobName || record.currentStage === 'detect' || record.currentStage === 'completed' || record.status === 'completed')) {
@@ -155,16 +184,27 @@ async function handleMessage(message: DequeuedMessageItem, queueName: Processing
       return;
     }
 
+    if (isRedelivery(message)) {
+      const errorMessage = `Queue message was delivered more than once for ${job.jobType}; retries are disabled.`;
+      await recordStore.markFailed(job.recordId, job.jobType, errorMessage, getRetryCount(message));
+      console.error('[worker] Marking redelivered message as failed', {
+        recordId: job.recordId,
+        jobType: job.jobType,
+        dequeueCount: message.dequeueCount,
+      });
+      return;
+    }
+
     if (job.jobType === 'trim') {
-      await runTrimJob(job);
+      await runTrimJob(job, retryCount);
     } else {
-      await runDetectJob(job);
+      await runDetectJob(job, retryCount);
     }
   } catch (error) {
     if (error instanceof NoSegmentsDetectedError && recordIdForFailure) {
-      await recordStore.markFailed(recordIdForFailure, 'trim', 'No motion segments detected');
+      await recordStore.markFailed(recordIdForFailure, 'trim', 'No motion segments detected', getRetryCount(message));
     } else if (recordIdForFailure) {
-      await recordStore.markFailed(recordIdForFailure, jobTypeForFailure, getErrorMessage(error));
+      await recordStore.markFailed(recordIdForFailure, jobTypeForFailure, getErrorMessage(error), getRetryCount(message));
     }
 
     console.error('[worker] Failed to process queue message', error);

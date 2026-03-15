@@ -27,6 +27,10 @@ function getStatusCode(error: unknown): number | undefined {
     : undefined;
 }
 
+function toDurationMs(startedAt: string, completedAt: string): number {
+  return Math.max(0, new Date(completedAt).getTime() - new Date(startedAt).getTime());
+}
+
 export class VideoRecordStore {
   private readonly client: TableClient;
   private readonly tableReady: Promise<void>;
@@ -85,36 +89,151 @@ export class VideoRecordStore {
     }, 'Merge');
   }
 
-  async markQueued(recordId: string, jobType: ProcessingJobType): Promise<void> {
+  async markQueued(recordId: string, jobType: ProcessingJobType, retryCount = 0, jobToken?: string): Promise<string> {
+    const queuedAt = new Date().toISOString();
+    const updates: Partial<VideoRecordEntity> = jobType === 'trim'
+      ? {
+          status: 'queued',
+          currentStage: 'trim',
+          queuedAt,
+          trimQueuedAt: queuedAt,
+          trimRetryCount: retryCount,
+          trimJobToken: jobToken,
+          trimErrorMessage: '',
+          trimFailedAt: '',
+          lastJobType: 'trim',
+          errorMessage: '',
+          failedAt: '',
+        }
+      : {
+          status: 'queued',
+          currentStage: 'detect',
+          queuedAt,
+          detectQueuedAt: queuedAt,
+          detectRetryCount: retryCount,
+          detectJobToken: jobToken,
+          detectErrorMessage: '',
+          detectFailedAt: '',
+          lastJobType: 'detect',
+          errorMessage: '',
+          failedAt: '',
+        };
+
+    await this.update(recordId, updates);
+    return queuedAt;
+  }
+
+  async markProcessing(recordId: string, jobType: ProcessingJobType, retryCount = 0): Promise<string> {
+    const startedAt = new Date().toISOString();
+    const updates: Partial<VideoRecordEntity> = jobType === 'trim'
+      ? {
+          status: 'processing',
+          currentStage: 'trim',
+          processingStartedAt: startedAt,
+          trimStartedAt: startedAt,
+          trimRetryCount: retryCount,
+          trimErrorMessage: '',
+          trimFailedAt: '',
+          lastJobType: 'trim',
+          errorMessage: '',
+          failedAt: '',
+        }
+      : {
+          status: 'processing',
+          currentStage: 'detect',
+          processingStartedAt: startedAt,
+          detectStartedAt: startedAt,
+          detectRetryCount: retryCount,
+          detectErrorMessage: '',
+          detectFailedAt: '',
+          lastJobType: 'detect',
+          errorMessage: '',
+          failedAt: '',
+        };
+
+    await this.update(recordId, updates);
+    return startedAt;
+  }
+
+  async markTrimCompletedAndQueueDetect(
+    recordId: string,
+    processedBlobName: string,
+    processedBlobUrl: string,
+    trimStartedAt: string,
+    detectJobToken: string
+  ): Promise<void> {
+    const now = new Date().toISOString();
     await this.update(recordId, {
       status: 'queued',
-      currentStage: jobType,
-      queuedAt: new Date().toISOString(),
-      lastJobType: jobType,
+      currentStage: 'detect',
+      lastJobType: 'detect',
+      processedBlobName,
+      processedBlobUrl,
+      queuedAt: now,
+      trimCompletedAt: now,
+      trimDurationMs: toDurationMs(trimStartedAt, now),
+      trimErrorMessage: '',
+      trimFailedAt: '',
+      detectQueuedAt: now,
+      detectJobToken,
+      detectErrorMessage: '',
+      detectFailedAt: '',
       errorMessage: '',
       failedAt: '',
     });
   }
 
-  async markProcessing(recordId: string, jobType: ProcessingJobType): Promise<void> {
+  async markDetectCompleted(
+    recordId: string,
+    detectionBlobName: string,
+    detectionBlobUrl: string,
+    detectStartedAt: string
+  ): Promise<void> {
+    const now = new Date().toISOString();
     await this.update(recordId, {
-      status: 'processing',
-      currentStage: jobType,
-      processingStartedAt: new Date().toISOString(),
-      lastJobType: jobType,
+      status: 'completed',
+      currentStage: 'completed',
+      lastJobType: 'detect',
+      completedAt: now,
+      detectionBlobName,
+      detectionBlobUrl,
+      detectCompletedAt: now,
+      detectDurationMs: toDurationMs(detectStartedAt, now),
+      detectErrorMessage: '',
+      detectFailedAt: '',
+      detectJobToken: '',
       errorMessage: '',
       failedAt: '',
     });
   }
 
-  async markFailed(recordId: string, jobType: ProcessingJobType, errorMessage: string): Promise<void> {
-    await this.update(recordId, {
-      status: 'failed',
-      currentStage: 'failed',
-      lastJobType: jobType,
-      failedAt: new Date().toISOString(),
-      errorMessage,
-    });
+  async markFailed(recordId: string, jobType: ProcessingJobType, errorMessage: string, retryCount = 0): Promise<void> {
+    const failedAt = new Date().toISOString();
+    const updates: Partial<VideoRecordEntity> = jobType === 'trim'
+      ? {
+          status: 'failed',
+          currentStage: 'failed',
+          lastJobType: 'trim',
+          failedAt,
+          trimFailedAt: failedAt,
+          trimRetryCount: retryCount,
+          trimJobToken: '',
+          trimErrorMessage: errorMessage,
+          errorMessage,
+        }
+      : {
+          status: 'failed',
+          currentStage: 'failed',
+          lastJobType: 'detect',
+          failedAt,
+          detectFailedAt: failedAt,
+          detectRetryCount: retryCount,
+          detectJobToken: '',
+          detectErrorMessage: errorMessage,
+          errorMessage,
+        };
+
+    await this.update(recordId, updates);
   }
 }
 

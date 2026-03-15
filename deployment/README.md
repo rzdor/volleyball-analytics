@@ -46,6 +46,8 @@ code is running** — EventGrid validates the function endpoint exists.
 | EventGrid System Topic | Captures blob events from the storage account |
 | EventGrid Subscription (`queue-upload-on-input`) | Routes `BlobCreated` in `volleyball-videos/input/` to `queueVideoUploadBlob`, which creates the Table record and enqueues the first trim job with a single delivery attempt (`maxDeliveryAttempts: 1`) |
 
+Queue messages are also handled as single-attempt work items by the worker: on any processing exception the record is marked `failed` and the message is deleted, and if Azure Queue Storage redelivers a message later it is marked failed instead of being retried.
+
 ## Prerequisites
 
 - Azure CLI installed (`az`)
