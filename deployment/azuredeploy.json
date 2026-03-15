@@ -82,6 +82,7 @@
     "logAnalyticsName": "[format('{0}-logs', parameters('projectName'))]",
     "functionAppImageName": "[format('{0}acr.azurecr.io/{0}-functions:latest', replace(parameters('projectName'), '-', ''))]",
     "workerImageName": "[format('{0}acr.azurecr.io/{0}-worker:latest', replace(parameters('projectName'), '-', ''))]",
+    "workerBootstrapImageName": "mcr.microsoft.com/k8se/quickstart:latest",
     "containerAppEnvironmentName": "[format('{0}-cae', parameters('projectName'))]",
     "workerContainerAppName": "[format('{0}-video-worker', parameters('projectName'))]"
   },
@@ -485,7 +486,7 @@
           "containers": [
             {
               "name": "video-worker",
-              "image": "[variables('workerImageName')]",
+              "image": "[variables('workerBootstrapImageName')]",
               "env": [
                 {
                   "name": "AZURE_STORAGE_CONNECTION_STRING",

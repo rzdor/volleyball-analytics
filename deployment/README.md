@@ -68,6 +68,9 @@ az deployment group create \
   --template-file azuredeploy.json \
   --parameters @azuredeploy.parameters.json
 
+# Note: the Container App is created with a public bootstrap image first.
+# The next step replaces it with the real worker image from ACR.
+
 # Step 2: Build and push Function App container to ACR
 az acr build \
   --registry volleyballacr \
