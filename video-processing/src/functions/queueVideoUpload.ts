@@ -19,7 +19,7 @@ export async function queueVideoUploadHandler(event: EventGridEvent, context: In
   }
 
   const recordStore = getVideoRecordStore();
-  const queue = getProcessingQueue();
+  const queue = getProcessingQueue('trim');
   const { created, record } = await recordStore.createFromUpload({
     containerName: blob.containerName,
     blobName: blob.blobName,

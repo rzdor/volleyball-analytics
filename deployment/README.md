@@ -26,7 +26,8 @@ Creates all Azure resources needed to run the project.
 | Blob Container (`coordination`) | — | Reserved for coordination/auxiliary assets |
 | Blob Container (`detections`) | — | Player detection results (JSON) |
 | Azure Table (`videoprocessingrecords`) | — | Tracks one record per uploaded video and processing state |
-| Azure Queue (`video-processing-jobs`) | — | Buffers trim/detect jobs for the worker |
+| Azure Queue (`video-trim-jobs`) | — | Buffers trim jobs for the worker |
+| Azure Queue (`video-detect-jobs`) | — | Buffers detect jobs after trim succeeds |
 | Azure Container Registry | Basic | Hosts Function App Docker images |
 | App Service Plan (Functions) | Basic B1, Linux | Hosts the containerized ingestion Function App |
 | Function App | Container (Docker) | Event Grid ingestion/orchestration (`video-processing/`) |
@@ -105,7 +106,8 @@ az deployment group create \
 | `coordinationBlobContainerName` | `coordination` | Blob container for logs/metadata |
 | `detectionsBlobContainerName` | `detections` | Blob container for detection results |
 | `videoRecordsTableName` | `videoprocessingrecords` | Azure Table used for per-video processing state |
-| `processingQueueName` | `video-processing-jobs` | Queue consumed by the worker container app |
+| `trimQueueName` | `video-trim-jobs` | Queue consumed by the worker for trim jobs |
+| `detectQueueName` | `video-detect-jobs` | Queue consumed by the worker for detect jobs |
 
 ### eventgrid.json
 

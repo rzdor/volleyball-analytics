@@ -5,13 +5,14 @@ import { randomUUID } from 'crypto';
 import { DequeuedMessageItem } from '@azure/storage-queue';
 import { detectPlayers } from './services/playerDetector';
 import { downloadBlobToFile } from './services/blobUtils';
-import { getProcessingQueue } from './services/processingQueue';
+import { getProcessingQueue, ProcessingQueueName } from './services/processingQueue';
 import { createVideoStorage } from './services/storageProvider';
 import { NoSegmentsDetectedError, runTrimPipeline } from './services/trimPipeline';
 import { getVideoRecordStore } from './services/videoRecordStore';
 import { ProcessingJobMessage } from './types/processing';
 
-const queue = getProcessingQueue();
+const trimQueue = getProcessingQueue('trim');
+const detectQueue = getProcessingQueue('detect');
 const recordStore = getVideoRecordStore();
 const storage = createVideoStorage({
   baseDir: path.join(os.tmpdir(), 'va-processing-worker'),
@@ -82,7 +83,7 @@ async function runTrimJob(job: ProcessingJobMessage): Promise<void> {
       processedBlobName: `processed/${trimResult.storedOutput.name}`,
     };
 
-    await queue.enqueue(detectJob);
+    await detectQueue.enqueue(detectJob);
     await recordStore.markQueued(job.recordId, 'detect');
   } finally {
     if (fs.existsSync(tempInputPath)) {
@@ -130,7 +131,7 @@ async function runDetectJob(job: ProcessingJobMessage): Promise<void> {
   }
 }
 
-async function handleMessage(message: DequeuedMessageItem): Promise<void> {
+async function handleMessage(message: DequeuedMessageItem, queueName: ProcessingQueueName): Promise<void> {
   let jobTypeForFailure: ProcessingJobMessage['jobType'] = 'trim';
   let recordIdForFailure: string | undefined;
 
@@ -168,7 +169,7 @@ async function handleMessage(message: DequeuedMessageItem): Promise<void> {
 
     console.error('[worker] Failed to process queue message', error);
   } finally {
-    await queue.deleteMessage(message.messageId, message.popReceipt);
+    await getProcessingQueue(queueName).deleteMessage(message.messageId, message.popReceipt);
   }
 }
 
@@ -179,15 +180,22 @@ async function runWorker(): Promise<void> {
   });
 
   while (true) {
-    const messages = await queue.receive(1, visibilityTimeoutSeconds);
+    const detectMessages = await detectQueue.receive(1, visibilityTimeoutSeconds);
+    if (detectMessages.length > 0) {
+      for (const message of detectMessages) {
+        await handleMessage(message, 'detect');
+      }
+      continue;
+    }
 
-    if (messages.length === 0) {
+    const trimMessages = await trimQueue.receive(1, visibilityTimeoutSeconds);
+    if (trimMessages.length === 0) {
       await sleep(pollIntervalMs);
       continue;
     }
 
-    for (const message of messages) {
-      await handleMessage(message);
+    for (const message of trimMessages) {
+      await handleMessage(message, 'trim');
     }
   }
 }

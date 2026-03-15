@@ -20,8 +20,11 @@
     "videoRecordsTableName": {
       "value": "videoprocessingrecords"
     },
-    "processingQueueName": {
-      "value": "video-processing-jobs"
+    "trimQueueName": {
+      "value": "video-trim-jobs"
+    },
+    "detectQueueName": {
+      "value": "video-detect-jobs"
     }
   }
 }

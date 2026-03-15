@@ -56,11 +56,18 @@
         "description": "Azure Table Storage table used to track uploaded video processing state."
       }
     },
-    "processingQueueName": {
+    "trimQueueName": {
       "type": "string",
-      "defaultValue": "video-processing-jobs",
+      "defaultValue": "video-trim-jobs",
       "metadata": {
-        "description": "Azure Queue Storage queue consumed by the video-processing worker."
+        "description": "Azure Queue Storage queue consumed for trim jobs."
+      }
+    },
+    "detectQueueName": {
+      "type": "string",
+      "defaultValue": "video-detect-jobs",
+      "metadata": {
+        "description": "Azure Queue Storage queue consumed for detect jobs after trimming succeeds."
       }
     }
   },
@@ -155,7 +162,15 @@
     {
       "type": "Microsoft.Storage/storageAccounts/queueServices/queues",
       "apiVersion": "2023-01-01",
-      "name": "[format('{0}/default/{1}', variables('storageAccountName'), parameters('processingQueueName'))]",
+      "name": "[format('{0}/default/{1}', variables('storageAccountName'), parameters('trimQueueName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts/queueServices', variables('storageAccountName'), 'default')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/queueServices/queues",
+      "apiVersion": "2023-01-01",
+      "name": "[format('{0}/default/{1}', variables('storageAccountName'), parameters('detectQueueName'))]",
       "dependsOn": [
         "[resourceId('Microsoft.Storage/storageAccounts/queueServices', variables('storageAccountName'), 'default')]"
       ]
@@ -395,8 +410,12 @@
               "value": "[parameters('videoRecordsTableName')]"
             },
             {
-              "name": "VIDEO_PROCESSING_QUEUE_NAME",
-              "value": "[parameters('processingQueueName')]"
+              "name": "VIDEO_TRIM_QUEUE_NAME",
+              "value": "[parameters('trimQueueName')]"
+            },
+            {
+              "name": "VIDEO_DETECT_QUEUE_NAME",
+              "value": "[parameters('detectQueueName')]"
             }
           ]
         }
@@ -477,10 +496,6 @@
                   "value": "[parameters('videoRecordsTableName')]"
                 },
                 {
-                  "name": "VIDEO_PROCESSING_QUEUE_NAME",
-                  "value": "[parameters('processingQueueName')]"
-                },
-                {
                   "name": "AZURE_STORAGE_INPUT_FOLDER",
                   "value": "input"
                 },
@@ -495,6 +510,14 @@
                 {
                   "name": "AZURE_STORAGE_CONTAINER",
                   "value": "[parameters('videoBlobContainerName')]"
+                },
+                {
+                  "name": "VIDEO_TRIM_QUEUE_NAME",
+                  "value": "[parameters('trimQueueName')]"
+                },
+                {
+                  "name": "VIDEO_DETECT_QUEUE_NAME",
+                  "value": "[parameters('detectQueueName')]"
                 }
               ],
               "resources": {
@@ -508,9 +531,22 @@
             "maxReplicas": 3,
             "rules": [
               {
-                "name": "processing-queue",
+                "name": "trim-queue",
                 "azureQueue": {
-                  "queueName": "[parameters('processingQueueName')]",
+                  "queueName": "[parameters('trimQueueName')]",
+                  "queueLength": 1,
+                  "auth": [
+                    {
+                      "secretRef": "storage-connection-string",
+                      "triggerParameter": "connection"
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "detect-queue",
+                "azureQueue": {
+                  "queueName": "[parameters('detectQueueName')]",
                   "queueLength": 1,
                   "auth": [
                     {
@@ -567,13 +603,17 @@
       "type": "string",
       "value": "[parameters('videoRecordsTableName')]"
     },
-    "processingQueueName": {
-      "type": "string",
-      "value": "[parameters('processingQueueName')]"
-    },
     "workerContainerAppName": {
       "type": "string",
       "value": "[variables('workerContainerAppName')]"
+    },
+    "trimQueueName": {
+      "type": "string",
+      "value": "[parameters('trimQueueName')]"
+    },
+    "detectQueueName": {
+      "type": "string",
+      "value": "[parameters('detectQueueName')]"
     }
   }
 }

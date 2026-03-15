@@ -1,7 +1,10 @@
 import { DequeuedMessageItem, QueueClient } from '@azure/storage-queue';
 import { ProcessingJobMessage } from '../types/processing';
 
-const DEFAULT_QUEUE_NAME = 'video-processing-jobs';
+export type ProcessingQueueName = 'trim' | 'detect';
+
+const DEFAULT_TRIM_QUEUE_NAME = 'video-trim-jobs';
+const DEFAULT_DETECT_QUEUE_NAME = 'video-detect-jobs';
 
 function getStorageConnectionString(): string {
   const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING ?? process.env.AzureWebJobsStorage;
@@ -11,8 +14,12 @@ function getStorageConnectionString(): string {
   return connectionString;
 }
 
-function getQueueName(): string {
-  return process.env.VIDEO_PROCESSING_QUEUE_NAME ?? DEFAULT_QUEUE_NAME;
+function getQueueName(queueName: ProcessingQueueName): string {
+  if (queueName === 'detect') {
+    return process.env.VIDEO_DETECT_QUEUE_NAME ?? DEFAULT_DETECT_QUEUE_NAME;
+  }
+
+  return process.env.VIDEO_TRIM_QUEUE_NAME ?? DEFAULT_TRIM_QUEUE_NAME;
 }
 
 function getStatusCode(error: unknown): number | undefined {
@@ -25,8 +32,8 @@ export class ProcessingQueue {
   private readonly queueClient: QueueClient;
   private readonly queueReady: Promise<void>;
 
-  constructor() {
-    this.queueClient = new QueueClient(getStorageConnectionString(), getQueueName());
+  constructor(queueName: ProcessingQueueName) {
+    this.queueClient = new QueueClient(getStorageConnectionString(), getQueueName(queueName));
     this.queueReady = this.queueClient.createIfNotExists().then(() => undefined).catch((error: unknown) => {
       if (getStatusCode(error) === 409) {
         return;
@@ -55,12 +62,15 @@ export class ProcessingQueue {
   }
 }
 
-let defaultQueue: ProcessingQueue | undefined;
+const queues = new Map<ProcessingQueueName, ProcessingQueue>();
 
-export function getProcessingQueue(): ProcessingQueue {
-  if (!defaultQueue) {
-    defaultQueue = new ProcessingQueue();
+export function getProcessingQueue(queueName: ProcessingQueueName): ProcessingQueue {
+  const existing = queues.get(queueName);
+  if (existing) {
+    return existing;
   }
 
-  return defaultQueue;
+  const queue = new ProcessingQueue(queueName);
+  queues.set(queueName, queue);
+  return queue;
 }
