@@ -42,6 +42,10 @@ on:
         description: 'Delete existing resource group before deploying (destroys all resources!)'
         type: boolean
         default: false
+      function_ready_timeout_seconds:
+        description: 'How long to wait for the Function App to expose functions before EventGrid deploy'
+        type: string
+        default: '300'
 
 env:
   AZURE_RESOURCE_GROUP: 'volleyball-rg-1'
@@ -239,12 +243,35 @@ jobs:
 
     - name: Wait for Function App to be ready
       run: |
-        echo "Waiting 60s for Function App to start with new image..."
-        sleep 60
-        az functionapp function list \
-          --name ${{ env.AZURE_FUNCTIONAPP_NAME }} \
-          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-          --query "[].name" -o tsv
+        timeout_seconds="${{ inputs.function_ready_timeout_seconds }}"
+        poll_interval_seconds=15
+        expected_function="queueVideoUploadBlob"
+        deadline=$((SECONDS + timeout_seconds))
+
+        echo "Waiting up to ${timeout_seconds}s for Function App to expose ${expected_function}..."
+
+        while true; do
+          function_names="$(az functionapp function list \
+            --name ${{ env.AZURE_FUNCTIONAPP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --query \"[].name\" -o tsv 2>/dev/null || true)"
+
+          if printf '%s\n' "$function_names" | grep -q "$expected_function"; then
+            echo "Function App is ready."
+            printf '%s\n' "$function_names"
+            break
+          fi
+
+          if [ "$SECONDS" -ge "$deadline" ]; then
+            echo "Timed out waiting for Function App readiness after ${timeout_seconds}s."
+            echo "Last observed functions:"
+            printf '%s\n' "$function_names"
+            exit 1
+          fi
+
+          echo "Function not ready yet; retrying in ${poll_interval_seconds}s..."
+          sleep "$poll_interval_seconds"
+        done
 
     - name: Deploy EventGrid ARM template
       uses: azure/arm-deploy@v2
