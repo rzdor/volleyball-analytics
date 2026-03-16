@@ -108,6 +108,12 @@ async function runTrimJob(job: ProcessingJobMessage, retryCount: number): Promis
       trimStartedAt,
       detectJob.jobToken
     );
+
+    console.log('[worker] Trim job completed', {
+      recordId: job.recordId,
+      processedBlobName: `processed/${trimResult.storedOutput.name}`,
+      detectJobToken: detectJob.jobToken,
+    });
   } finally {
     if (fs.existsSync(tempInputPath)) {
       fs.unlinkSync(tempInputPath);
@@ -140,6 +146,11 @@ async function runDetectJob(job: ProcessingJobMessage, retryCount: number): Prom
       storedDetection.url,
       detectStartedAt
     );
+
+    console.log('[worker] Detect job completed', {
+      recordId: job.recordId,
+      detectionBlobName: `detections/${storedDetection.name}`,
+    });
 
     if (fs.existsSync(detectionJsonPath)) {
       fs.unlinkSync(detectionJsonPath);

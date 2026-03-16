@@ -1,6 +1,6 @@
 # Volleyball Analytics — Azure Deployment
 
-ARM templates to provision the project environment. Split into two templates
+ARM templates to provision the project environment. Split into multiple templates
 to support the correct deployment order.
 
 ## Deployment Order
@@ -9,6 +9,7 @@ to support the correct deployment order.
 1. azuredeploy.json        → Infrastructure (storage, table, queue, apps, ACR, worker)
 2. Deploy code             → Push Function App + worker images to ACR, deploy web app via CI/CD
 3. eventgrid.json          → Event wiring (requires function code to be deployed)
+4. monitoring-workbook.json → Monitoring workbook + diagnostics
 ```
 
 ## Templates
@@ -44,9 +45,28 @@ code is running** — EventGrid validates the function endpoint exists.
 | Resource | Purpose |
 |---|---|
 | EventGrid System Topic | Captures blob events from the storage account |
-| EventGrid Subscription (`queue-upload-on-input`) | Routes `BlobCreated` in `volleyball-videos/input/` to `queueVideoUploadBlob`, which creates the Table record and enqueues the first trim job with a single delivery attempt (`maxDeliveryAttempts: 1`) |
+| EventGrid Subscription (`queue-upload-on-input`) | Routes `BlobCreated` and `BlobRenamed` events for `volleyball-videos/input/` to `queueVideoUploadBlob`, which creates the Table record and enqueues the first trim job using the retry policy defined in `eventgrid.json` (`maxDeliveryAttempts: 3` in the current template) |
 
 Queue messages are also handled as single-attempt work items by the worker: on any processing exception the record is marked `failed` and the message is deleted, and if Azure Queue Storage redelivers a message later it is marked failed instead of being retried.
+
+`BlobRenamed` is emitted only by storage features that support rename events (for example ADLS Gen2 hierarchical namespace or SFTP rename). When those events are available, the function now uses the rename destination URL and only processes files whose final path is under `input/`.
+
+### `monitoring-workbook.json` — Monitoring Workbook
+
+Creates the final monitoring step of the deployment:
+
+| Resource | Purpose |
+|---|---|
+| Web App diagnostic setting | Sends App Service HTTP/application logs and metrics to Log Analytics so request volume can be queried in the workbook |
+| Blob Service diagnostic setting | Sends blob write logs and metrics to Log Analytics so uploaded/created files can be counted |
+| Azure Monitor Workbook | Dashboard for web requests, function-ingested files, worker-processed files, storage blob writes, and worker failures |
+
+The workbook queries these Log Analytics tables:
+
+- `AppServiceHTTPLogs`
+- `AppTraces`
+- `ContainerAppConsoleLogs_CL`
+- `StorageBlobLogs`
 
 ## Prerequisites
 
@@ -95,6 +115,12 @@ az deployment group create \
   --resource-group volleyball-rg \
   --template-file eventgrid.json \
   --parameters @eventgrid.parameters.json
+
+# Step 6: Deploy monitoring workbook and diagnostics
+az deployment group create \
+  --resource-group volleyball-rg \
+  --template-file monitoring-workbook.json \
+  --parameters @monitoring-workbook.parameters.json
 ```
 
 ## Parameters
@@ -120,3 +146,10 @@ az deployment group create \
 | `projectName` | `volleyball` | Must match infrastructure template |
 | `location` | Resource group location | Must match infrastructure deployment |
 | `videoBlobContainerName` | `volleyball-videos` | Must match infrastructure template |
+
+### monitoring-workbook.json
+
+| Parameter | Default | Description |
+|---|---|---|
+| `projectName` | `volleyball` | Must match infrastructure template |
+| `location` | Resource group location | Workbook location |

@@ -1,0 +1,214 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "projectName": {
+      "type": "string",
+      "defaultValue": "volleyball",
+      "metadata": {
+        "description": "Base name used to generate resource names."
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Azure region for monitoring resources."
+      }
+    }
+  },
+  "variables": {
+    "webAppName": "[format('{0}-web', parameters('projectName'))]",
+    "functionAppName": "[format('{0}-functions', parameters('projectName'))]",
+    "storageAccountName": "[format('{0}storage', replace(parameters('projectName'), '-', ''))]",
+    "logAnalyticsName": "[format('{0}-logs', parameters('projectName'))]",
+    "workerContainerAppName": "[format('{0}-video-worker', parameters('projectName'))]",
+    "monitoringWorkbookId": "[guid(resourceGroup().id, parameters('projectName'), 'monitoring-workbook')]",
+    "monitoringWorkbookDisplayName": "[format('{0} monitoring dashboard', parameters('projectName'))]",
+    "workspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))]",
+    "webAppResourceId": "[resourceId('Microsoft.Web/sites', variables('webAppName'))]",
+    "blobServiceResourceId": "[resourceId('Microsoft.Storage/storageAccounts/blobServices', variables('storageAccountName'), 'default')]",
+    "webAppDiagnosticsName": "send-webapp-logs-to-la",
+    "blobServiceDiagnosticsName": "send-blob-logs-to-la",
+    "webRequestsQuery": "[format('AppServiceHTTPLogs | where _ResourceId =~ ''{0}'' | summarize Requests=count() by bin(TimeGenerated, 1h) | order by TimeGenerated asc', variables('webAppResourceId'))]",
+    "functionProcessedQuery": "AppTraces | where Message has 'queueVideoUpload queued trim job' or Message has 'queueVideoUpload recovered unqueued record and queued trim job' | summarize FilesQueued=count() by bin(TimeGenerated, 1h) | order by TimeGenerated asc",
+    "workerProcessedQuery": "[format('ContainerAppConsoleLogs_CL | where ContainerAppName_s == ''{0}'' | where Log_s has ''[worker] Trim job completed'' or Log_s has ''[worker] Detect job completed'' | extend Stage = iff(Log_s has ''Detect job completed'', ''detect'', ''trim'') | summarize FilesProcessed=count() by Stage, bin(TimeGenerated, 1h) | order by TimeGenerated asc', variables('workerContainerAppName'))]",
+    "storageWritesQuery": "[format('StorageBlobLogs | where AccountName == ''{0}'' | where OperationName in (''PutBlob'', ''PutBlockList'', ''CopyBlob'') | where StatusCode startswith ''2'' | summarize BlobWrites=count() by OperationName, bin(TimeGenerated, 1h) | order by TimeGenerated asc', variables('storageAccountName'))]",
+    "workerFailuresQuery": "[format('ContainerAppConsoleLogs_CL | where ContainerAppName_s == ''{0}'' | where Log_s has ''[worker] Failed to process queue message'' | summarize WorkerFailures=count() by bin(TimeGenerated, 1h) | order by TimeGenerated asc', variables('workerContainerAppName'))]",
+    "workbookData": {
+      "version": "Notebook/1.0",
+      "items": [
+        {
+          "type": 1,
+          "content": {
+            "json": "[format('# {0} monitoring dashboard\\nTrack web traffic, video ingestion, worker throughput, blob writes, and worker failures.\\n\\nThis workbook is deployed by `deploy-full.yml`. Log-backed charts start filling in as the apps receive traffic and process jobs.', parameters('projectName'))]"
+          },
+          "name": "text - intro"
+        },
+        {
+          "type": 3,
+          "content": {
+            "version": "KqlItem/1.0",
+            "query": "[variables('webRequestsQuery')]",
+            "size": 0,
+            "title": "Web app requests",
+            "timeContext": {
+              "durationMs": 86400000
+            },
+            "queryType": 0,
+            "resourceType": "microsoft.operationalinsights/workspaces",
+            "crossComponentResources": [
+              "[variables('workspaceResourceId')]"
+            ],
+            "visualization": "timechart"
+          },
+          "name": "query - web-requests"
+        },
+        {
+          "type": 3,
+          "content": {
+            "version": "KqlItem/1.0",
+            "query": "[variables('functionProcessedQuery')]",
+            "size": 0,
+            "title": "Function app files queued for processing",
+            "timeContext": {
+              "durationMs": 86400000
+            },
+            "queryType": 0,
+            "resourceType": "microsoft.operationalinsights/workspaces",
+            "crossComponentResources": [
+              "[variables('workspaceResourceId')]"
+            ],
+            "visualization": "timechart"
+          },
+          "name": "query - function-processed"
+        },
+        {
+          "type": 3,
+          "content": {
+            "version": "KqlItem/1.0",
+            "query": "[variables('workerProcessedQuery')]",
+            "size": 0,
+            "title": "Worker files processed",
+            "timeContext": {
+              "durationMs": 86400000
+            },
+            "queryType": 0,
+            "resourceType": "microsoft.operationalinsights/workspaces",
+            "crossComponentResources": [
+              "[variables('workspaceResourceId')]"
+            ],
+            "visualization": "timechart"
+          },
+          "name": "query - worker-processed"
+        },
+        {
+          "type": 3,
+          "content": {
+            "version": "KqlItem/1.0",
+            "query": "[variables('storageWritesQuery')]",
+            "size": 0,
+            "title": "Storage blob uploads and creates",
+            "timeContext": {
+              "durationMs": 86400000
+            },
+            "queryType": 0,
+            "resourceType": "microsoft.operationalinsights/workspaces",
+            "crossComponentResources": [
+              "[variables('workspaceResourceId')]"
+            ],
+            "visualization": "timechart"
+          },
+          "name": "query - storage-writes"
+        },
+        {
+          "type": 3,
+          "content": {
+            "version": "KqlItem/1.0",
+            "query": "[variables('workerFailuresQuery')]",
+            "size": 0,
+            "title": "Worker failures",
+            "timeContext": {
+              "durationMs": 86400000
+            },
+            "queryType": 0,
+            "resourceType": "microsoft.operationalinsights/workspaces",
+            "crossComponentResources": [
+              "[variables('workspaceResourceId')]"
+            ],
+            "visualization": "timechart"
+          },
+          "name": "query - worker-failures"
+        }
+      ],
+      "isLocked": false,
+      "fallbackResourceIds": [
+        "[variables('workspaceResourceId')]"
+      ]
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Web/sites/providers/diagnosticSettings",
+      "apiVersion": "2021-05-01-preview",
+      "name": "[format('{0}/microsoft.insights/{1}', variables('webAppName'), variables('webAppDiagnosticsName'))]",
+      "properties": {
+        "workspaceId": "[variables('workspaceResourceId')]",
+        "logAnalyticsDestinationType": "Dedicated",
+        "logs": [
+          {
+            "categoryGroup": "allLogs",
+            "enabled": true
+          }
+        ],
+        "metrics": [
+          {
+            "category": "AllMetrics",
+            "enabled": true
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/blobServices/providers/diagnosticSettings",
+      "apiVersion": "2021-05-01-preview",
+      "name": "[format('{0}/default/microsoft.insights/{1}', variables('storageAccountName'), variables('blobServiceDiagnosticsName'))]",
+      "properties": {
+        "workspaceId": "[variables('workspaceResourceId')]",
+        "logAnalyticsDestinationType": "Dedicated",
+        "logs": [
+          {
+            "categoryGroup": "allLogs",
+            "enabled": true
+          }
+        ],
+        "metrics": [
+          {
+            "category": "AllMetrics",
+            "enabled": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "[variables('monitoringWorkbookId')]",
+      "type": "Microsoft.Insights/workbooks",
+      "location": "[parameters('location')]",
+      "apiVersion": "2018-06-17-preview",
+      "kind": "shared",
+      "properties": {
+        "displayName": "[variables('monitoringWorkbookDisplayName')]",
+        "serializedData": "[string(variables('workbookData'))]",
+        "version": "1.0",
+        "sourceId": "[variables('workspaceResourceId')]",
+        "category": "workbook"
+      }
+    }
+  ],
+  "outputs": {
+    "monitoringWorkbookResourceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Insights/workbooks', variables('monitoringWorkbookId'))]"
+    }
+  }
+}

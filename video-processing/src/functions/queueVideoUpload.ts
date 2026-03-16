@@ -5,13 +5,34 @@ import { getProcessingQueue } from '../services/processingQueue';
 import { getVideoRecordStore } from '../services/videoRecordStore';
 import { isInputBlob, ProcessingJobMessage } from '../types/processing';
 
-export async function queueVideoUploadHandler(event: EventGridEvent, context: InvocationContext): Promise<void> {
-  const data = event.data as { url?: string };
-  const blobUrl = data.url;
+type BlobCreatedEventData = {
+  url?: string;
+};
 
-  if (!blobUrl) {
+type BlobRenamedEventData = {
+  sourceUrl?: string;
+  destinationUrl?: string;
+};
+
+function getBlobUrl(event: EventGridEvent): string {
+  if (event.eventType === 'Microsoft.Storage.BlobRenamed') {
+    const data = event.data as BlobRenamedEventData;
+    if (!data.destinationUrl) {
+      throw new Error('EventGrid blob-renamed event is missing data.destinationUrl');
+    }
+    return data.destinationUrl;
+  }
+
+  const data = event.data as BlobCreatedEventData;
+  if (!data.url) {
     throw new Error('EventGrid blob-created event is missing data.url');
   }
+
+  return data.url;
+}
+
+export async function queueVideoUploadHandler(event: EventGridEvent, context: InvocationContext): Promise<void> {
+  const blobUrl = getBlobUrl(event);
 
   const blob = parseBlobUrl(blobUrl);
   if (!isInputBlob(blob.blobName)) {

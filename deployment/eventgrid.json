@@ -58,13 +58,14 @@
         },
         "filter": {
           "includedEventTypes": [
-            "Microsoft.Storage.BlobCreated"
+            "Microsoft.Storage.BlobCreated",
+            "Microsoft.Storage.BlobRenamed"
           ],
           "subjectBeginsWith": "[format('/blobServices/default/containers/{0}/blobs/input/', parameters('videoBlobContainerName'))]",
           "subjectEndsWith": ""
         },
         "retryPolicy": {
-          "maxDeliveryAttempts": 1,
+          "maxDeliveryAttempts": 3,
           "eventTimeToLiveInMinutes": 1440
         },
         "eventDeliverySchema": "EventGridSchema"

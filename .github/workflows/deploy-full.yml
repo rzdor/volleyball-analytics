@@ -1,9 +1,10 @@
-# Full deployment pipeline: Infrastructure → Code → EventGrid
+# Full deployment pipeline: Infrastructure → Code → EventGrid → Monitoring
 #
 # Runs the complete deployment sequence:
 #   1. Deploy ARM infrastructure template (azuredeploy.json)
 #   2. Build and deploy web app + function app/container worker code
 #   3. Deploy EventGrid wiring (eventgrid.json)
+#   4. Deploy monitoring workbook and diagnostics (monitoring-workbook.json)
 #
 # Requires a single manual approval at the start via the 'Development' environment
 # to prevent accidental environment recreation.
@@ -17,7 +18,7 @@
 #      - AZURE_TENANT_ID
 #      - AZURE_SUBSCRIPTION_ID
 
-name: Deploy Infrastructure & Code
+name: Deploy Infrastructure, Code & Monitoring
 
 on:
   workflow_dispatch:
@@ -32,6 +33,10 @@ on:
         default: true
       deploy_eventgrid:
         description: 'Deploy EventGrid wiring'
+        type: boolean
+        default: true
+      deploy_monitoring:
+        description: 'Deploy monitoring workbook and diagnostics'
         type: boolean
         default: true
       azure_location:
@@ -308,4 +313,31 @@ jobs:
         resourceGroupName: ${{ env.AZURE_RESOURCE_GROUP }}
         template: deployment/eventgrid.json
         parameters: deployment/eventgrid.parameters.json
+        deploymentMode: Incremental
+
+  # ──────────────────────────────────────────────
+  # Step 4: Deploy monitoring workbook and diagnostics
+  # ──────────────────────────────────────────────
+  deploy_monitoring:
+    needs: [approve, build_and_deploy_web, build_and_deploy_functions, build_and_deploy_worker, deploy_eventgrid]
+    if: ${{ always() && inputs.deploy_monitoring && needs.approve.result == 'success' && (needs.build_and_deploy_web.result == 'success' || needs.build_and_deploy_web.result == 'skipped') && (needs.build_and_deploy_functions.result == 'success' || needs.build_and_deploy_functions.result == 'skipped') && (needs.build_and_deploy_worker.result == 'success' || needs.build_and_deploy_worker.result == 'skipped') && (needs.deploy_eventgrid.result == 'success' || needs.deploy_eventgrid.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    environment:
+      name: 'Development'
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Azure Login using OIDC
+      uses: azure/login@v2
+      with:
+        client-id: ${{ secrets.AZURE_CLIENT_ID }}
+        tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+        subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+    - name: Deploy monitoring workbook and diagnostics
+      uses: azure/arm-deploy@v2
+      with:
+        resourceGroupName: ${{ env.AZURE_RESOURCE_GROUP }}
+        template: deployment/monitoring-workbook.json
+        parameters: deployment/monitoring-workbook.parameters.json
         deploymentMode: Incremental
