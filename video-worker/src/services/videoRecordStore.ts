@@ -160,7 +160,9 @@ export class VideoRecordStore {
     processedBlobName: string,
     processedBlobUrl: string,
     trimStartedAt: string,
-    detectJobToken: string
+    detectJobToken: string,
+    processedOutputFolder: string,
+    processedSceneCount: number
   ): Promise<void> {
     const now = new Date().toISOString();
     await this.update(recordId, {
@@ -169,6 +171,8 @@ export class VideoRecordStore {
       lastJobType: 'detect',
       processedBlobName,
       processedBlobUrl,
+      processedOutputFolder,
+      processedSceneCount,
       queuedAt: now,
       trimCompletedAt: now,
       trimDurationMs: toDurationMs(trimStartedAt, now),

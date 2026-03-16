@@ -59,6 +59,8 @@ export interface VideoRecordEntity {
   lastJobType?: ProcessingJobType;
   processedBlobName?: string;
   processedBlobUrl?: string;
+  processedOutputFolder?: string;
+  processedSceneCount?: number;
   detectionBlobName?: string;
   detectionBlobUrl?: string;
   errorMessage?: string;

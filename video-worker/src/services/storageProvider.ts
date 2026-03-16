@@ -26,6 +26,17 @@ interface StorageOptions {
   detectionFolder?: string;
 }
 
+function normalizeRelativeName(value: string): string {
+  const normalized = value.replace(/\\/g, '/').replace(/^\/+/, '');
+  const safe = path.posix.normalize(normalized);
+
+  if (!safe || safe === '.' || safe.startsWith('../') || safe.includes('/../')) {
+    throw new Error(`Invalid storage path: ${value}`);
+  }
+
+  return safe;
+}
+
 function ensureDir(dir: string): void {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
@@ -120,6 +131,10 @@ export class VideoStorage {
     return this.localDetectionDir;
   }
 
+  isRemoteStorage(): boolean {
+    return Boolean(this.containerClient);
+  }
+
   async saveInput(localPath: string, preferredName?: string): Promise<StoredVideo> {
     return this.save(localPath, preferredName, 'input');
   }
@@ -166,11 +181,12 @@ export class VideoStorage {
 
   private buildLocalUrl(kind: VideoKind, filename: string): string {
     const folder = kind === 'input' ? 'inputs' : kind === 'detection' ? 'detections' : 'processed';
-    return `/uploads/${folder}/${filename}`;
+    const relativeName = normalizeRelativeName(filename);
+    return `/uploads/${folder}/${relativeName}`;
   }
 
   private async save(localPath: string, preferredName: string | undefined, kind: VideoKind): Promise<StoredVideo> {
-    const filename = path.basename(preferredName ?? localPath);
+    const filename = normalizeRelativeName(preferredName ?? path.basename(localPath));
     if (this.containerClient && this.sharedKey) {
       await this.containerReady;
       const blobName = `${this.getPrefix(kind)}/${filename}`;
@@ -201,6 +217,7 @@ export class VideoStorage {
     }
 
     const destination = path.join(this.getLocalDir(kind), filename);
+    ensureDir(path.dirname(destination));
     if (path.resolve(localPath) !== path.resolve(destination)) {
       fs.copyFileSync(localPath, destination);
     }
@@ -233,10 +250,11 @@ export class VideoStorage {
       return [];
     }
 
-    return fs.readdirSync(dir)
-      .filter(file => fs.statSync(path.join(dir, file)).isFile())
-      .map(file => {
-        const stats = fs.statSync(path.join(dir, file));
+    const files = this.listLocalFiles(dir);
+
+    return files.map(file => {
+        const fullPath = path.join(dir, file);
+        const stats = fs.statSync(fullPath);
         const url = this.buildLocalUrl(kind, file);
         return {
           name: file,
@@ -246,6 +264,23 @@ export class VideoStorage {
           lastModified: stats.mtime.toISOString(),
         };
       });
+  }
+
+  private listLocalFiles(dir: string, prefix = ''): string[] {
+    return fs.readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
+      const relativePath = prefix ? path.posix.join(prefix, entry.name) : entry.name;
+      const fullPath = path.join(dir, entry.name);
+
+      if (entry.isDirectory()) {
+        return this.listLocalFiles(fullPath, relativePath);
+      }
+
+      if (!entry.isFile()) {
+        return [];
+      }
+
+      return [relativePath];
+    });
   }
 
   private async exists(filename: string, kind: VideoKind): Promise<boolean> {

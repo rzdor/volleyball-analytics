@@ -9,13 +9,18 @@ document.addEventListener('DOMContentLoaded', () => {
   const loading = document.getElementById('loading');
   const trimBtn = document.getElementById('trimBtn');
   const videoUrlInput = document.getElementById('videoUrl');
-  const segmentsSummary = document.getElementById('segmentsSummary');
-  const segmentsList = document.getElementById('segmentsList');
+  const statusSummary = document.getElementById('statusSummary');
+  const statusFacts = document.getElementById('statusFacts');
+  const statusStages = document.getElementById('statusStages');
+  const statusError = document.getElementById('statusError');
   const downloadLink = document.getElementById('downloadLink');
+  const detectionLink = document.getElementById('detectionLink');
   const processedPreview = document.getElementById('processedPreview');
   const uploadedList = document.getElementById('uploadedList');
   const processedList = document.getElementById('processedList');
   const refreshLibraryBtn = document.getElementById('refreshLibrary');
+  let activeRecordId = null;
+  let statusPollTimeout = null;
 
   updateSubmitState();
   fetchExistingVideos();
@@ -130,10 +135,10 @@ document.addEventListener('DOMContentLoaded', () => {
     results.classList.add('hidden');
 
     try {
-    const response = await fetch(url, {
-      method: 'POST',
-      body: data
-    });
+      const response = await fetch(url, {
+        method: 'POST',
+        body: data
+      });
       const result = await response.json();
 
       if (result.success) {
@@ -158,35 +163,277 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function displayResults(result) {
-    const segments = (result.segments || []).filter(seg => seg && typeof seg.start === 'number' && typeof seg.end === 'number');
-    const totalDuration = segments.reduce((sum, seg) => sum + (seg.end - seg.start), 0);
-    segmentsSummary.textContent = `Detected ${segments.length} play segment${segments.length === 1 ? '' : 's'} covering ${formatDuration(totalDuration)}.`;
+    activeRecordId = result.recordId || null;
+    results.classList.remove('hidden');
+    results.scrollIntoView({ behavior: 'smooth' });
 
-    segmentsList.innerHTML = segments.map((seg, idx) => {
-      return `<div class="analysis-section">
-        <h3>Segment ${idx + 1}</h3>
-        <p>${formatDuration(seg.start)} → ${formatDuration(seg.end)}</p>
+    renderPendingStatus(result);
+
+    if (activeRecordId) {
+      pollVideoStatus(activeRecordId, true);
+    }
+  }
+
+  function renderPendingStatus(result) {
+    statusSummary.textContent = 'Upload complete. Waiting for the processing pipeline to pick up this video.';
+    renderStatusFacts([
+      ['Record ID', result.recordId || 'Pending'],
+      ['Blob', result.blobName || 'Pending'],
+      ['Container', result.container || 'Pending']
+    ]);
+    renderStatusStages([
+      { label: 'Upload accepted', state: 'done', detail: 'Stored in Blob Storage.' },
+      { label: 'Trim queued', state: 'active', detail: 'Waiting for ingestion/status record.' },
+      { label: 'Detect players', state: 'todo', detail: 'Will start after trim completes.' },
+      { label: 'Completed', state: 'todo', detail: 'Outputs will appear here.' }
+    ]);
+    statusError.textContent = '';
+    statusError.classList.add('hidden');
+    updateResultLinks({});
+  }
+
+  async function pollVideoStatus(recordId, immediate = false) {
+    clearStatusPolling();
+
+    if (!recordId) {
+      return;
+    }
+
+    const run = async () => {
+      try {
+        const response = await fetch(`/api/videos/status/${encodeURIComponent(recordId)}`);
+
+        if (response.status === 404) {
+          statusSummary.textContent = 'Upload complete. Waiting for the ingestion function to create the tracking record.';
+          scheduleStatusPoll(recordId);
+          return;
+        }
+
+        if (!response.ok) {
+          throw new Error('Failed to fetch processing status');
+        }
+
+        const status = await response.json();
+        renderVideoStatus(status);
+
+        if (!isTerminalStatus(status.status)) {
+          scheduleStatusPoll(recordId);
+          return;
+        }
+
+        fetchExistingVideos();
+      } catch (error) {
+        console.error('Status polling error:', error);
+        statusSummary.textContent = 'Unable to refresh processing status right now.';
+        scheduleStatusPoll(recordId);
+      }
+    };
+
+    if (immediate) {
+      await run();
+      return;
+    }
+
+    statusPollTimeout = window.setTimeout(run, 3000);
+  }
+
+  function scheduleStatusPoll(recordId) {
+    clearStatusPolling();
+    statusPollTimeout = window.setTimeout(() => {
+      pollVideoStatus(recordId, true);
+    }, 3000);
+  }
+
+  function clearStatusPolling() {
+    if (statusPollTimeout) {
+      window.clearTimeout(statusPollTimeout);
+      statusPollTimeout = null;
+    }
+  }
+
+  function renderVideoStatus(status) {
+    const summary = [];
+    summary.push(`Stage: ${formatStage(status.currentStage)}`);
+    summary.push(`Status: ${formatStatus(status.status)}`);
+
+    if (status.status === 'completed') {
+      summary.push('Processing finished successfully.');
+    } else if (status.status === 'failed') {
+      summary.push('Processing failed.');
+    } else if (status.status === 'processing') {
+      summary.push('The worker is actively processing this video.');
+    } else if (status.status === 'queued') {
+      summary.push('The job is queued and waiting for a worker.');
+    }
+
+    statusSummary.textContent = summary.join(' ');
+
+    const facts = [
+      ['Record ID', status.recordId],
+      ['Source blob', status.sourceBlobName],
+      ['Uploaded', formatDateTime(status.uploadedAt)],
+      ['Updated', formatDateTime(status.updatedAt)],
+      ['Current stage', formatStage(status.currentStage)]
+    ];
+
+    if (status.processedOutputFolder) {
+      facts.push(['Output folder', status.processedOutputFolder]);
+    }
+
+    if (typeof status.processedSceneCount === 'number') {
+      facts.push(['Scene files', String(status.processedSceneCount)]);
+    }
+
+    renderStatusFacts(facts);
+
+    renderStatusStages([
+      {
+        label: 'Upload accepted',
+        state: 'done',
+        detail: formatDateTime(status.uploadedAt)
+      },
+      {
+        label: 'Trim stage',
+        state: getStageState(status, 'trim'),
+        detail: describeStage(status.trim)
+      },
+      {
+        label: 'Detect stage',
+        state: getStageState(status, 'detect'),
+        detail: describeStage(status.detect)
+      },
+      {
+        label: 'Completed',
+        state: status.status === 'completed' ? 'done' : status.status === 'failed' ? 'blocked' : 'todo',
+        detail: status.completedAt ? formatDateTime(status.completedAt) : 'Waiting for final outputs.'
+      }
+    ]);
+
+    if (status.errorMessage) {
+      statusError.textContent = status.errorMessage;
+      statusError.classList.remove('hidden');
+    } else {
+      statusError.textContent = '';
+      statusError.classList.add('hidden');
+    }
+
+    updateResultLinks(status);
+  }
+
+  function renderStatusFacts(items) {
+    statusFacts.innerHTML = items.map(([label, value]) => {
+      return `<div class="status-fact"><span class="status-fact-label">${escapeHtml(label)}</span><span class="status-fact-value">${escapeHtml(value || '—')}</span></div>`;
+    }).join('');
+  }
+
+  function renderStatusStages(items) {
+    statusStages.innerHTML = items.map((item) => {
+      return `<div class="status-stage status-stage-${item.state}">
+        <div class="status-stage-header">
+          <span class="status-stage-label">${escapeHtml(item.label)}</span>
+          <span class="status-stage-badge">${escapeHtml(formatStageState(item.state))}</span>
+        </div>
+        <p>${escapeHtml(item.detail || '—')}</p>
       </div>`;
     }).join('');
+  }
 
-    const videoUrl = result.previewUrl || result.downloadUrl;
-    if (result.downloadUrl) {
-      downloadLink.href = result.downloadUrl;
+  function updateResultLinks(status) {
+    if (status.processedBlobUrl) {
+      downloadLink.href = status.processedBlobUrl;
       downloadLink.classList.remove('hidden');
+      processedPreview.src = status.processedBlobUrl;
+      processedPreview.classList.remove('hidden');
     } else {
       downloadLink.removeAttribute('href');
       downloadLink.classList.add('hidden');
-    }
-
-    if (videoUrl) {
-      processedPreview.src = videoUrl;
-      processedPreview.classList.remove('hidden');
-    } else {
+      processedPreview.removeAttribute('src');
       processedPreview.classList.add('hidden');
     }
 
-    results.classList.remove('hidden');
-    results.scrollIntoView({ behavior: 'smooth' });
+    if (status.detectionBlobUrl) {
+      detectionLink.href = status.detectionBlobUrl;
+      detectionLink.classList.remove('hidden');
+    } else {
+      detectionLink.removeAttribute('href');
+      detectionLink.classList.add('hidden');
+    }
+  }
+
+  function getStageState(status, stageName) {
+    if (status.status === 'failed' && status.currentStage === 'failed') {
+      const failedStage = status.detect && (status.detect.failedAt || status.detect.errorMessage) ? 'detect' : 'trim';
+      return failedStage === stageName ? 'blocked' : stageName === 'trim' && status.trim && status.trim.completedAt ? 'done' : 'todo';
+    }
+
+    const stage = status[stageName];
+    if (stage && stage.completedAt) return 'done';
+    if (status.currentStage === stageName && status.status === 'processing') return 'active';
+    if (status.currentStage === stageName && status.status === 'queued') return 'active';
+    if (stageName === 'detect' && status.trim && status.trim.completedAt) return 'active';
+    return 'todo';
+  }
+
+  function describeStage(stage) {
+    if (!stage) {
+      return 'Waiting to start.';
+    }
+    if (stage.completedAt) {
+      const duration = typeof stage.durationMs === 'number' ? ` (${formatMilliseconds(stage.durationMs)})` : '';
+      return `Completed ${formatDateTime(stage.completedAt)}${duration}`;
+    }
+    if (stage.failedAt) {
+      return `Failed ${formatDateTime(stage.failedAt)}${stage.errorMessage ? `: ${stage.errorMessage}` : ''}`;
+    }
+    if (stage.startedAt) {
+      return `Started ${formatDateTime(stage.startedAt)}`;
+    }
+    if (stage.queuedAt) {
+      return `Queued ${formatDateTime(stage.queuedAt)}`;
+    }
+    return 'Waiting to start.';
+  }
+
+  function isTerminalStatus(status) {
+    return status === 'completed' || status === 'failed';
+  }
+
+  function formatStatus(status) {
+    return (status || 'unknown').replace(/-/g, ' ');
+  }
+
+  function formatStage(stage) {
+    return (stage || 'unknown').replace(/-/g, ' ');
+  }
+
+  function formatStageState(state) {
+    if (state === 'done') return 'Done';
+    if (state === 'active') return 'In progress';
+    if (state === 'blocked') return 'Failed';
+    return 'Pending';
+  }
+
+  function formatDateTime(value) {
+    if (!value) return '—';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleString();
+  }
+
+  function formatMilliseconds(value) {
+    if (value < 1000) {
+      return `${value} ms`;
+    }
+    return `${(value / 1000).toFixed(1)} s`;
+  }
+
+  function escapeHtml(value) {
+    return String(value)
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
   }
 
   async function fetchExistingVideos() {
@@ -280,4 +527,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     return `${minutes}:${seconds}`;
   }
+
+  window.addEventListener('beforeunload', () => {
+    clearStatusPolling();
+  });
 });

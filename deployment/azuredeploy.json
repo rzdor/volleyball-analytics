@@ -289,6 +289,10 @@
             {
               "name": "VIDEO_BLOB_CONTAINER",
               "value": "[parameters('videoBlobContainerName')]"
+            },
+            {
+              "name": "VIDEO_RECORDS_TABLE_NAME",
+              "value": "[parameters('videoRecordsTableName')]"
             }
           ]
         }

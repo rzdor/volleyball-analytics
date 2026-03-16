@@ -49,6 +49,8 @@ code is running** — EventGrid validates the function endpoint exists.
 
 Queue messages are also handled as single-attempt work items by the worker: on any processing exception the record is marked `failed` and the message is deleted, and if Azure Queue Storage redelivers a message later it is marked failed instead of being retried.
 
+After trim completes, the worker now stores the consolidated trimmed video and each individual scene clip under `processed/{recordId}/` in Blob Storage. The detect stage still consumes the full trimmed video from that folder.
+
 `BlobRenamed` is emitted only by storage features that support rename events (for example ADLS Gen2 hierarchical namespace or SFTP rename). When those events are available, the function now uses the rename destination URL and only processes files whose final path is under `input/`.
 
 ### `monitoring-workbook.json` — Monitoring Workbook

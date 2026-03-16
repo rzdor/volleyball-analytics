@@ -83,12 +83,15 @@ async function runTrimJob(job: ProcessingJobMessage, retryCount: number): Promis
     }, tempInputPath);
 
     const sourceBaseName = path.basename(job.sourceBlobName, path.extname(job.sourceBlobName));
+    const outputFolder = path.posix.join('processed', job.recordId);
     const trimResult = await runTrimPipeline({
       videoPath: tempInputPath,
       storage,
       persistInput: false,
-      outputFilename: `${sourceBaseName}-trimmed.mp4`,
+      outputFilename: path.posix.join(job.recordId, `${sourceBaseName}-trimmed.mp4`),
+      sceneOutputPrefix: job.recordId,
     });
+    const processedBlobName = `processed/${trimResult.storedOutput.name}`;
 
     const detectJob: ProcessingJobMessage = {
       version: 1,
@@ -97,21 +100,25 @@ async function runTrimJob(job: ProcessingJobMessage, retryCount: number): Promis
       recordId: job.recordId,
       sourceContainer: job.sourceContainer,
       sourceBlobName: job.sourceBlobName,
-      processedBlobName: `processed/${trimResult.storedOutput.name}`,
+      processedBlobName,
     };
 
     await detectQueue.enqueue(detectJob);
     await recordStore.markTrimCompletedAndQueueDetect(
       job.recordId,
-      `processed/${trimResult.storedOutput.name}`,
+      processedBlobName,
       trimResult.storedOutput.url,
       trimStartedAt,
-      detectJob.jobToken
+      detectJob.jobToken,
+      outputFolder,
+      trimResult.storedScenes.length
     );
 
     console.log('[worker] Trim job completed', {
       recordId: job.recordId,
-      processedBlobName: `processed/${trimResult.storedOutput.name}`,
+      processedBlobName,
+      processedSceneCount: trimResult.storedScenes.length,
+      processedOutputFolder: outputFolder,
       detectJobToken: detectJob.jobToken,
     });
   } finally {

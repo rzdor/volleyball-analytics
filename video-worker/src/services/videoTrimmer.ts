@@ -72,3 +72,34 @@ export async function trimVideoToSegments(
       .run();
   });
 }
+
+export async function trimVideoToScene(
+  inputPath: string,
+  segment: TimeRange,
+  outputPath: string
+): Promise<void> {
+  if (segment.end <= segment.start) {
+    throw new Error(`Invalid segment range: ${segment.start}-${segment.end}`);
+  }
+
+  const withAudio = await hasAudioStream(inputPath);
+
+  return new Promise((resolve, reject) => {
+    const cmd = ffmpeg(inputPath)
+      .setStartTime(segment.start)
+      .duration(segment.end - segment.start)
+      .videoCodec('libx264');
+
+    if (withAudio) {
+      cmd.audioCodec('aac');
+    } else {
+      cmd.noAudio();
+    }
+
+    cmd
+      .output(outputPath)
+      .on('end', () => resolve())
+      .on('error', reject)
+      .run();
+  });
+}

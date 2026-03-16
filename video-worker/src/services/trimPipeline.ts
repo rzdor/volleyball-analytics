@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { MotionDetectorOptions, TimeRange, detectMotionSegments } from './motionDetector';
-import { trimVideoToSegments } from './videoTrimmer';
+import { trimVideoToScene, trimVideoToSegments } from './videoTrimmer';
 import { StoredVideo, VideoStorage, getDefaultStorage } from './storageProvider';
 import { MAX_REMOTE_VIDEO_BYTES, VideoDownloadError, downloadVideoFromUrl } from './remoteVideoDownloader';
 
@@ -23,15 +23,30 @@ export interface TrimPipelineParams {
   motionOptions?: MotionDetectorOptions;
   maxBytes?: number;
   outputFilename?: string;
+  sceneOutputPrefix?: string;
   persistInput?: boolean;
 }
 
 export interface TrimPipelineResult {
   segments: TimeRange[];
   storedOutput: StoredVideo;
+  storedScenes: StoredVideo[];
   storedInput?: StoredVideo;
   outputPath: string;
+  sceneOutputPaths: string[];
   downloadedPath?: string;
+}
+
+function cleanupLocalFile(filePath: string | undefined): void {
+  if (!filePath || !fs.existsSync(filePath)) {
+    return;
+  }
+
+  try {
+    fs.unlinkSync(filePath);
+  } catch (cleanupErr) {
+    console.error(`Failed to clean up local file: ${filePath}`, cleanupErr);
+  }
 }
 
 export async function runTrimPipeline(params: TrimPipelineParams): Promise<TrimPipelineResult> {
@@ -43,6 +58,7 @@ export async function runTrimPipeline(params: TrimPipelineParams): Promise<TrimP
   let inputPath = params.videoPath;
   let downloadedPath: string | undefined;
   let outputPath: string | undefined;
+  const sceneOutputPaths: string[] = [];
 
   if (!inputPath) {
     if (params.videoUrl) {
@@ -65,25 +81,36 @@ export async function runTrimPipeline(params: TrimPipelineParams): Promise<TrimP
 
     const filename = params.outputFilename ?? `trimmed-${randomUUID()}.mp4`;
     outputPath = path.join(storage.getLocalOutputDir(), filename);
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
     await trimVideoToSegments(inputPath, segments, outputPath);
     const storedOutput = await storage.saveOutput(outputPath, filename);
+    const scenePrefix = params.sceneOutputPrefix ?? path.posix.dirname(filename);
+    const sceneBaseName = path.basename(filename, path.extname(filename));
+    const storedScenes: StoredVideo[] = [];
 
-    return { segments, storedOutput, storedInput, outputPath, downloadedPath };
+    for (const [index, segment] of segments.entries()) {
+      const sceneFilename = path.posix.join(scenePrefix, `${sceneBaseName}-scene-${String(index + 1).padStart(3, '0')}.mp4`);
+      const sceneOutputPath = path.join(storage.getLocalOutputDir(), sceneFilename);
+      fs.mkdirSync(path.dirname(sceneOutputPath), { recursive: true });
+      await trimVideoToScene(inputPath, segment, sceneOutputPath);
+      sceneOutputPaths.push(sceneOutputPath);
+      storedScenes.push(await storage.saveOutput(sceneOutputPath, sceneFilename));
+    }
+
+    if (storage.isRemoteStorage()) {
+      cleanupLocalFile(outputPath);
+      for (const sceneOutputPath of sceneOutputPaths) {
+        cleanupLocalFile(sceneOutputPath);
+      }
+    }
+
+    return { segments, storedOutput, storedScenes, storedInput, outputPath, sceneOutputPaths, downloadedPath };
   } catch (err) {
-    if (outputPath && fs.existsSync(outputPath)) {
-      try {
-        fs.unlinkSync(outputPath);
-      } catch (cleanupErr) {
-        console.error(`Failed to clean up output file: ${outputPath}`, cleanupErr);
-      }
+    cleanupLocalFile(outputPath);
+    for (const sceneOutputPath of sceneOutputPaths) {
+      cleanupLocalFile(sceneOutputPath);
     }
-    if (downloadedPath && fs.existsSync(downloadedPath)) {
-      try {
-        fs.unlinkSync(downloadedPath);
-      } catch (cleanupErr) {
-        console.error(`Failed to clean up downloaded file: ${downloadedPath}`, cleanupErr);
-      }
-    }
+    cleanupLocalFile(downloadedPath);
     throw err;
   }
 }
