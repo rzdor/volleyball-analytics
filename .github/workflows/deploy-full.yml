@@ -54,6 +54,7 @@ env:
   AZURE_CONTAINERAPP_NAME: 'volleyball-video-worker'
   WEBAPP_WORKING_DIRECTORY: 'web-application'
   FUNCTIONAPP_WORKING_DIRECTORY: 'video-processing'
+  WORKER_WORKING_DIRECTORY: 'video-worker'
   NODE_VERSION: '20.x'
   ACR_NAME: 'volleyballacr'
   ACR_FUNCTION_IMAGE: 'volleyball-functions'
@@ -178,13 +179,21 @@ jobs:
       with:
         node-version: ${{ env.NODE_VERSION }}
         cache: 'npm'
-        cache-dependency-path: video-processing/package-lock.json
+        cache-dependency-path: |
+          video-processing/package-lock.json
+          video-worker/package-lock.json
 
     - name: npm install and build (video-processing)
       run: |
         npm install
         npm run build
       working-directory: ${{ env.FUNCTIONAPP_WORKING_DIRECTORY }}
+
+    - name: npm install and build (video-worker)
+      run: |
+        npm install
+        npm run build
+      working-directory: ${{ env.WORKER_WORKING_DIRECTORY }}
 
     - name: Azure Login using OIDC
       uses: azure/login@v2
@@ -208,9 +217,8 @@ jobs:
           --registry ${{ env.ACR_NAME }} \
           --image ${{ env.ACR_WORKER_IMAGE }}:${{ github.sha }} \
           --image ${{ env.ACR_WORKER_IMAGE }}:latest \
-          --file Dockerfile.worker \
           .
-      working-directory: ${{ env.FUNCTIONAPP_WORKING_DIRECTORY }}
+      working-directory: ${{ env.WORKER_WORKING_DIRECTORY }}
 
     - name: Restart Function App to pull new image
       run: az webapp restart --name ${{ env.AZURE_FUNCTIONAPP_NAME }} --resource-group ${{ env.AZURE_RESOURCE_GROUP }}

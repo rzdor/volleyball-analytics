@@ -32,7 +32,7 @@ Creates all Azure resources needed to run the project.
 | App Service Plan (Functions) | Basic B1, Linux | Hosts the containerized ingestion Function App |
 | Function App | Container (Docker) | Event Grid ingestion/orchestration (`video-processing/`) |
 | Container Apps Environment | Consumption | Runtime environment for the queue worker |
-| Container App | Container (Docker) | Queue-driven trim/detection worker (`video-processing/Dockerfile.worker`) |
+| Container App | Container (Docker) | Queue-driven trim/detection worker (`video-worker/Dockerfile`) |
 | Application Insights | — | Monitoring and telemetry |
 | Log Analytics Workspace | — | Log aggregation |
 
@@ -81,8 +81,7 @@ az acr build \
 az acr build \
   --registry volleyballacr \
   --image volleyball-worker:latest \
-  --file ../video-processing/Dockerfile.worker \
-  ../video-processing
+  ../video-worker
 
 # Step 4: Restart Function App and update the worker image
 az webapp restart --name volleyball-functions --resource-group volleyball-rg
