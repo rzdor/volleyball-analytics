@@ -119,7 +119,7 @@ jobs:
         deploymentMode: Incremental
 
   # ──────────────────────────────────────────────
-  # Step 2: Build and deploy application code
+  # Step 2: Build and deploy application code in parallel
   # ──────────────────────────────────────────────
   build_and_deploy_web:
     needs: [approve, deploy_infrastructure]
@@ -179,21 +179,13 @@ jobs:
       with:
         node-version: ${{ env.NODE_VERSION }}
         cache: 'npm'
-        cache-dependency-path: |
-          video-processing/package-lock.json
-          video-worker/package-lock.json
+        cache-dependency-path: video-processing/package-lock.json
 
     - name: npm install and build (video-processing)
       run: |
         npm install
         npm run build
       working-directory: ${{ env.FUNCTIONAPP_WORKING_DIRECTORY }}
-
-    - name: npm install and build (video-worker)
-      run: |
-        npm install
-        npm run build
-      working-directory: ${{ env.WORKER_WORKING_DIRECTORY }}
 
     - name: Azure Login using OIDC
       uses: azure/login@v2
@@ -211,6 +203,38 @@ jobs:
           .
       working-directory: ${{ env.FUNCTIONAPP_WORKING_DIRECTORY }}
 
+    - name: Restart Function App to pull new image
+      run: az webapp restart --name ${{ env.AZURE_FUNCTIONAPP_NAME }} --resource-group ${{ env.AZURE_RESOURCE_GROUP }}
+
+  build_and_deploy_worker:
+    needs: [approve, deploy_infrastructure]
+    if: ${{ always() && inputs.deploy_code && needs.approve.result == 'success' && (needs.deploy_infrastructure.result == 'success' || needs.deploy_infrastructure.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    environment:
+      name: 'Development'
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        cache-dependency-path: video-worker/package-lock.json
+
+    - name: npm install and build (video-worker)
+      run: |
+        npm install
+        npm run build
+      working-directory: ${{ env.WORKER_WORKING_DIRECTORY }}
+
+    - name: Azure Login using OIDC
+      uses: azure/login@v2
+      with:
+        client-id: ${{ secrets.AZURE_CLIENT_ID }}
+        tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+        subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
     - name: Build and push worker image to ACR
       run: |
         az acr build \
@@ -219,9 +243,6 @@ jobs:
           --image ${{ env.ACR_WORKER_IMAGE }}:latest \
           .
       working-directory: ${{ env.WORKER_WORKING_DIRECTORY }}
-
-    - name: Restart Function App to pull new image
-      run: az webapp restart --name ${{ env.AZURE_FUNCTIONAPP_NAME }} --resource-group ${{ env.AZURE_RESOURCE_GROUP }}
 
     - name: Update Container App worker image
       run: |
@@ -234,8 +255,8 @@ jobs:
   # Step 3: Deploy EventGrid wiring
   # ──────────────────────────────────────────────
   deploy_eventgrid:
-    needs: [build_and_deploy_web, build_and_deploy_functions]
-    if: ${{ always() && inputs.deploy_eventgrid && (needs.build_and_deploy_functions.result == 'success' || needs.build_and_deploy_functions.result == 'skipped') }}
+    needs: [build_and_deploy_web, build_and_deploy_functions, build_and_deploy_worker]
+    if: ${{ always() && inputs.deploy_eventgrid && (needs.build_and_deploy_functions.result == 'success' || needs.build_and_deploy_functions.result == 'skipped') && (needs.build_and_deploy_worker.result == 'success' || needs.build_and_deploy_worker.result == 'skipped') }}
     runs-on: ubuntu-latest
     environment:
       name: 'Development'
