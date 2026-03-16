@@ -4,7 +4,7 @@
   "description": "Queue-driven container worker for volleyball video processing",
   "main": "dist/src/worker.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/copyPython.js",
     "watch": "tsc -w",
     "clean": "rimraf dist",
     "start": "node dist/src/worker.js",
