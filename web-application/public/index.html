@@ -80,7 +80,13 @@
 
       <div id="loading" class="loading hidden">
         <div class="spinner"></div>
-        <p>Processing your video...</p>
+        <p id="loadingMessage">Processing your video...</p>
+        <div id="uploadProgress" class="upload-progress hidden" aria-live="polite">
+          <div class="upload-progress-bar">
+            <div id="uploadProgressFill" class="upload-progress-fill"></div>
+          </div>
+          <p id="uploadProgressText" class="upload-progress-text">Uploading: 0%</p>
+        </div>
       </div>
     </main>
 

@@ -7,6 +7,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const uploadForm = document.getElementById('uploadForm');
   const results = document.getElementById('results');
   const loading = document.getElementById('loading');
+  const loadingMessage = document.getElementById('loadingMessage');
+  const uploadProgress = document.getElementById('uploadProgress');
+  const uploadProgressFill = document.getElementById('uploadProgressFill');
+  const uploadProgressText = document.getElementById('uploadProgressText');
   const trimBtn = document.getElementById('trimBtn');
   const videoUrlInput = document.getElementById('videoUrl');
   const fileTypesHint = document.getElementById('fileTypesHint');
@@ -169,23 +173,19 @@ document.addEventListener('DOMContentLoaded', () => {
       formData.append('videoUrl', videoUrl);
     }
 
-    await processVideo('/api/videos/trim', formData);
+    await processVideo('/api/videos/trim', formData, { trackUpload: Boolean(file) });
   });
 
   refreshLibraryBtn?.addEventListener('click', () => {
     fetchExistingVideos();
   });
 
-  async function processVideo(url, data) {
-    showLoading(true);
+  async function processVideo(url, data, options = {}) {
+    showLoading(true, options);
     results.classList.add('hidden');
 
     try {
-      const response = await fetch(url, {
-        method: 'POST',
-        body: data
-      });
-      const result = await response.json();
+      const result = await uploadWithProgress(url, data, options);
 
       if (result.success) {
         displayResults(result);
@@ -197,14 +197,110 @@ document.addEventListener('DOMContentLoaded', () => {
       console.error('Error:', error);
       alert('Failed to process video: ' + error.message);
     } finally {
-      showLoading(false);
+      showLoading(false, options);
     }
   }
 
-  function showLoading(show) {
+  function showLoading(show, options = {}) {
     loading.classList.toggle('hidden', !show);
+
+    if (show) {
+      const uploadMessage = options.trackUpload
+        ? 'Uploading your video...'
+        : 'Submitting your video request...';
+      if (loadingMessage) {
+        loadingMessage.textContent = uploadMessage;
+      }
+      resetUploadProgress(options.trackUpload);
+    } else {
+      if (loadingMessage) {
+        loadingMessage.textContent = 'Processing your video...';
+      }
+      resetUploadProgress(false);
+    }
+
     document.querySelectorAll('button[type="submit"]').forEach(btn => {
       btn.disabled = show;
+    });
+  }
+
+  function resetUploadProgress(show) {
+    if (!uploadProgress || !uploadProgressFill || !uploadProgressText) {
+      return;
+    }
+
+    uploadProgress.classList.toggle('hidden', !show);
+    uploadProgressFill.style.width = '0%';
+    uploadProgressText.textContent = 'Uploading: 0%';
+  }
+
+  function updateUploadProgress(percent, message) {
+    if (!uploadProgress || !uploadProgressFill || !uploadProgressText) {
+      return;
+    }
+
+    uploadProgress.classList.remove('hidden');
+    uploadProgressFill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+    uploadProgressText.textContent = message;
+  }
+
+  function uploadWithProgress(url, data, options = {}) {
+    return new Promise((resolve, reject) => {
+      const request = new XMLHttpRequest();
+      request.open('POST', url);
+      request.responseType = 'text';
+
+      if (options.trackUpload && request.upload) {
+        request.upload.addEventListener('progress', (event) => {
+          if (!event.lengthComputable) {
+            updateUploadProgress(0, 'Uploading video...');
+            return;
+          }
+
+          const percent = Math.round((event.loaded / event.total) * 100);
+          updateUploadProgress(percent, `Uploading: ${percent}%`);
+        });
+
+        request.upload.addEventListener('load', () => {
+          updateUploadProgress(100, 'Upload complete. Waiting for server response...');
+          if (loadingMessage) {
+            loadingMessage.textContent = 'Upload finished. Starting processing pipeline...';
+          }
+        });
+      } else if (loadingMessage) {
+        loadingMessage.textContent = 'Submitting your request...';
+      }
+
+      request.addEventListener('load', () => {
+        let payload = {};
+
+        try {
+          payload = request.responseText ? JSON.parse(request.responseText) : {};
+        } catch (error) {
+          reject(new Error('Received an invalid server response.'));
+          return;
+        }
+
+        if (request.status >= 200 && request.status < 300) {
+          resolve(payload);
+          return;
+        }
+
+        const serverMessage = payload && typeof payload === 'object' && 'error' in payload
+          ? payload.error
+          : undefined;
+        reject(new Error(serverMessage || 'Processing failed'));
+      });
+
+      request.addEventListener('error', () => {
+        reject(new Error('Upload failed due to a network error.'));
+      });
+
+      request.addEventListener('abort', () => {
+        reject(new Error('Upload was cancelled.'));
+      });
+
+      request.send(data);
     });
   }
 
