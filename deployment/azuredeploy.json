@@ -69,6 +69,13 @@
       "metadata": {
         "description": "Azure Queue Storage queue consumed for detect jobs after trimming succeeds."
       }
+    },
+    "videoUploadMaxBytes": {
+      "type": "string",
+      "defaultValue": "5368709120",
+      "metadata": {
+        "description": "Maximum allowed upload size for the web application in bytes."
+      }
     }
   },
   "variables": {
@@ -293,6 +300,10 @@
             {
               "name": "VIDEO_RECORDS_TABLE_NAME",
               "value": "[parameters('videoRecordsTableName')]"
+            },
+            {
+              "name": "VIDEO_UPLOAD_MAX_BYTES",
+              "value": "[parameters('videoUploadMaxBytes')]"
             }
           ]
         }

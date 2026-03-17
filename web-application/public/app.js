@@ -9,6 +9,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const loading = document.getElementById('loading');
   const trimBtn = document.getElementById('trimBtn');
   const videoUrlInput = document.getElementById('videoUrl');
+  const fileTypesHint = document.getElementById('fileTypesHint');
+  const videoUrlHint = document.getElementById('videoUrlHint');
   const statusSummary = document.getElementById('statusSummary');
   const statusFacts = document.getElementById('statusFacts');
   const statusStages = document.getElementById('statusStages');
@@ -21,8 +23,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const refreshLibraryBtn = document.getElementById('refreshLibrary');
   let activeRecordId = null;
   let statusPollTimeout = null;
+  let maxUploadBytes = null;
+  let maxUploadSizeLabel = '5 GB';
 
   updateSubmitState();
+  fetchUploadConfig();
   fetchExistingVideos();
 
   // Drag and drop handlers
@@ -68,6 +73,12 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
+    if (typeof maxUploadBytes === 'number' && file.size > maxUploadBytes) {
+      alert(`Please select a video smaller than ${maxUploadSizeLabel}.`);
+      videoInput.value = '';
+      return;
+    }
+
     videoUrlInput.value = '';
     const url = URL.createObjectURL(file);
     videoPreview.src = url;
@@ -77,9 +88,43 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function formatFileSize(bytes) {
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let value = bytes;
+    let unitIndex = 0;
+
+    while (value >= 1024 && unitIndex < units.length - 1) {
+      value /= 1024;
+      unitIndex += 1;
+    }
+
+    const precision = unitIndex === 0 ? 0 : 1;
+    return `${value.toFixed(precision)} ${units[unitIndex]}`;
+  }
+
+  async function fetchUploadConfig() {
+    try {
+      const response = await fetch('/api/videos/config');
+      if (!response.ok) {
+        throw new Error('Failed to load upload config');
+      }
+
+      const config = await response.json();
+      if (typeof config.maxVideoBytes === 'number') {
+        maxUploadBytes = config.maxVideoBytes;
+      }
+      if (config.maxVideoSizeLabel) {
+        maxUploadSizeLabel = config.maxVideoSizeLabel;
+      }
+
+      if (fileTypesHint) {
+        fileTypesHint.textContent = `Supported: MP4, WebM, MOV, AVI (max ${maxUploadSizeLabel})`;
+      }
+      if (videoUrlHint) {
+        videoUrlHint.textContent = `Use a direct link to your cloud video (publicly accessible, max ${maxUploadSizeLabel}).`;
+      }
+    } catch (error) {
+      console.error('Unable to fetch upload config', error);
+    }
   }
 
   function isValidUrl(value) {

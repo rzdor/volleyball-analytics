@@ -21,7 +21,7 @@
             <div class="drop-zone-content">
               <span class="drop-icon">📹</span>
               <p>Drag & drop your video here or click to browse</p>
-              <p class="file-types">Supported: MP4, WebM, MOV, AVI (max 100MB)</p>
+              <p id="fileTypesHint" class="file-types">Supported: MP4, WebM, MOV, AVI (max 5 GB)</p>
             </div>
             <input type="file" id="videoInput" name="video" accept="video/*" hidden>
           </div>
@@ -33,7 +33,7 @@
           <div class="form-group">
             <label for="videoUrl">Paste a public link</label>
             <input class="text-input" type="url" id="videoUrl" name="videoUrl" placeholder="https://storage.example.com/match.mp4" inputmode="url">
-            <p class="hint">Use a direct link to your cloud video (publicly accessible, max 100MB).</p>
+            <p id="videoUrlHint" class="hint">Use a direct link to your cloud video (publicly accessible, max 5 GB).</p>
           </div>
           <p class="hint">We will detect motion and trim out rotations, timeouts, and other downtime automatically.</p>
           <button type="submit" id="trimBtn" class="btn-primary">Remove Non-Play Time</button>

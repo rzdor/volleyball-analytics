@@ -140,6 +140,7 @@ az deployment group create \
 | `videoRecordsTableName` | `videoprocessingrecords` | Azure Table used for per-video processing state |
 | `trimQueueName` | `video-trim-jobs` | Queue consumed by the worker for trim jobs |
 | `detectQueueName` | `video-detect-jobs` | Queue consumed by the worker for detect jobs |
+| `videoUploadMaxBytes` | `5368709120` | Maximum upload size for the web app in bytes (default 5 GB) |
 
 ### eventgrid.json
 

@@ -25,6 +25,9 @@
     },
     "detectQueueName": {
       "value": "video-detect-jobs"
+    },
+    "videoUploadMaxBytes": {
+      "value": "5368709120"
     }
   }
 }

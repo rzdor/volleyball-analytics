@@ -10,10 +10,11 @@ import { BlobServiceClient } from '@azure/storage-blob';
 const router = Router();
 
 const uploadsInputDir = path.resolve(process.cwd(), 'uploads/inputs');
-const MAX_VIDEO_BYTES = 100 * 1024 * 1024; // 100MB
+const DEFAULT_MAX_VIDEO_BYTES = 5 * 1024 * 1024 * 1024; // 5GB
 const BLOB_CONTAINER = process.env.VIDEO_BLOB_CONTAINER || 'volleyball-videos';
 const BLOB_FOLDER = 'input';
 const VIDEO_RECORDS_TABLE_NAME = process.env.VIDEO_RECORDS_TABLE_NAME || 'videoprocessingrecords';
+const MAX_VIDEO_BYTES = getMaxVideoBytes();
 
 type VideoStatusRecord = {
   partitionKey: string;
@@ -52,6 +53,25 @@ type VideoStatusRecord = {
   detectionBlobUrl?: string;
   errorMessage?: string;
 };
+
+function getMaxVideoBytes(): number {
+  const configured = Number.parseInt(process.env.VIDEO_UPLOAD_MAX_BYTES ?? '', 10);
+  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_MAX_VIDEO_BYTES;
+}
+
+function formatBytes(bytes: number): string {
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let value = bytes;
+  let unitIndex = 0;
+
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+
+  const precision = unitIndex === 0 ? 0 : 1;
+  return `${value.toFixed(precision)} ${units[unitIndex]}`;
+}
 
 function getBlobServiceClient(): BlobServiceClient {
   const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
@@ -115,34 +135,56 @@ const upload = multer({
   limits: { fileSize: MAX_VIDEO_BYTES }
 });
 
+const uploadSingleVideo = upload.single('video');
+
 // TODO: Update to call the Function App video-processing endpoint
-router.post('/trim', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: true, legacyHeaders: false }), upload.single('video'), async (req: Request, res: Response): Promise<void> => {
-  try {
-    if (!req.file) {
-      res.status(400).json({ error: 'No video file provided.' });
+router.post('/trim', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: true, legacyHeaders: false }), (req: Request, res: Response): void => {
+  uploadSingleVideo(req, res, async (error?: unknown) => {
+    if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
+      res.status(413).json({ error: `File exceeds the upload limit of ${formatBytes(MAX_VIDEO_BYTES)}.` });
       return;
     }
 
-    const blobName = req.file.filename;
-    const blobUrl = await uploadToBlob(req.file.path, blobName);
-    const fullBlobName = `${BLOB_FOLDER}/${blobName}`;
-    const recordId = buildVideoRecordId(BLOB_CONTAINER, fullBlobName);
+    if (error) {
+      console.error('Upload middleware error:', error);
+      res.status(400).json({ error: 'Failed to read the uploaded file.' });
+      return;
+    }
 
-    // Clean up local temp file
-    fs.unlink(req.file.path, () => {});
+    try {
+      if (!req.file) {
+        res.status(400).json({ error: 'No video file provided.' });
+        return;
+      }
 
-    res.json({
-      success: true,
-      recordId,
-      blobUrl,
-      blobName: fullBlobName,
-      container: BLOB_CONTAINER,
-    });
-  } catch (error) {
-    console.error('Upload error:', error);
-    if (req.file?.path) fs.unlink(req.file.path, () => {});
-    res.status(500).json({ error: 'Failed to upload video' });
-  }
+      const blobName = req.file.filename;
+      const blobUrl = await uploadToBlob(req.file.path, blobName);
+      const fullBlobName = `${BLOB_FOLDER}/${blobName}`;
+      const recordId = buildVideoRecordId(BLOB_CONTAINER, fullBlobName);
+
+      // Clean up local temp file
+      fs.unlink(req.file.path, () => {});
+
+      res.json({
+        success: true,
+        recordId,
+        blobUrl,
+        blobName: fullBlobName,
+        container: BLOB_CONTAINER,
+      });
+    } catch (handlerError) {
+      console.error('Upload error:', handlerError);
+      if (req.file?.path) fs.unlink(req.file.path, () => {});
+      res.status(500).json({ error: 'Failed to upload video' });
+    }
+  });
+});
+
+router.get('/config', (_req: Request, res: Response): void => {
+  res.json({
+    maxVideoBytes: MAX_VIDEO_BYTES,
+    maxVideoSizeLabel: formatBytes(MAX_VIDEO_BYTES),
+  });
 });
 
 router.get('/status/:recordId', rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: true, legacyHeaders: false }), async (req: Request, res: Response): Promise<void> => {
