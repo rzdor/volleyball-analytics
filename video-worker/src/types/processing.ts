@@ -5,9 +5,9 @@ export const PROCESSING_INPUT_PREFIX = 'input/';
 export const PROCESSING_OUTPUT_PREFIX = 'processed/';
 export const PROCESSING_DETECTION_PREFIX = 'detections/';
 
-export type ProcessingJobType = 'trim' | 'detect';
+export type ProcessingJobType = 'convert' | 'trim' | 'detect';
 export type VideoProcessingStatus = 'uploaded' | 'queued' | 'processing' | 'completed' | 'failed';
-export type VideoProcessingStage = 'ingest' | 'trim' | 'detect' | 'completed';
+export type VideoProcessingStage = 'ingest' | 'convert' | 'trim' | 'detect' | 'completed';
 
 export interface UploadedVideoDescriptor {
   containerName: string;
@@ -22,6 +22,7 @@ export interface ProcessingJobMessage {
   recordId: string;
   sourceContainer: string;
   sourceBlobName: string;
+  convertedBlobName?: string;
   processedBlobName?: string;
 }
 
@@ -40,6 +41,13 @@ export interface VideoRecordEntity {
   processingStartedAt?: string;
   completedAt?: string;
   failedAt?: string;
+  convertQueuedAt?: string;
+  convertStartedAt?: string;
+  convertCompletedAt?: string;
+  convertFailedAt?: string;
+  convertDurationMs?: number;
+  convertRetryCount?: number;
+  convertErrorMessage?: string;
   trimQueuedAt?: string;
   trimStartedAt?: string;
   trimCompletedAt?: string;
@@ -54,9 +62,12 @@ export interface VideoRecordEntity {
   detectDurationMs?: number;
   detectRetryCount?: number;
   detectErrorMessage?: string;
+  convertJobToken?: string;
   trimJobToken?: string;
   detectJobToken?: string;
   lastJobType?: ProcessingJobType;
+  convertedBlobName?: string;
+  convertedBlobUrl?: string;
   processedBlobName?: string;
   processedBlobUrl?: string;
   processedOutputFolder?: string;
@@ -87,6 +98,7 @@ export function createUploadedVideoEntity(upload: UploadedVideoDescriptor): Vide
     currentStage: 'ingest',
     uploadedAt: now,
     updatedAt: now,
+    convertRetryCount: 0,
     trimRetryCount: 0,
     detectRetryCount: 0,
   };

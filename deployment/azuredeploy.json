@@ -56,6 +56,13 @@
         "description": "Azure Table Storage table used to track uploaded video processing state."
       }
     },
+    "convertQueueName": {
+      "type": "string",
+      "defaultValue": "video-convert-jobs",
+      "metadata": {
+        "description": "Azure Queue Storage queue consumed for 720p conversion jobs."
+      }
+    },
     "trimQueueName": {
       "type": "string",
       "defaultValue": "video-trim-jobs",
@@ -165,6 +172,14 @@
       "name": "[format('{0}/default', variables('storageAccountName'))]",
       "dependsOn": [
         "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/queueServices/queues",
+      "apiVersion": "2023-01-01",
+      "name": "[format('{0}/default/{1}', variables('storageAccountName'), parameters('convertQueueName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts/queueServices', variables('storageAccountName'), 'default')]"
       ]
     },
     {
@@ -426,6 +441,10 @@
               "value": "[parameters('videoRecordsTableName')]"
             },
             {
+              "name": "VIDEO_CONVERT_QUEUE_NAME",
+              "value": "[parameters('convertQueueName')]"
+            },
+            {
               "name": "VIDEO_TRIM_QUEUE_NAME",
               "value": "[parameters('trimQueueName')]"
             },
@@ -528,6 +547,10 @@
                   "value": "[parameters('videoBlobContainerName')]"
                 },
                 {
+                  "name": "VIDEO_CONVERT_QUEUE_NAME",
+                  "value": "[parameters('convertQueueName')]"
+                },
+                {
                   "name": "VIDEO_TRIM_QUEUE_NAME",
                   "value": "[parameters('trimQueueName')]"
                 },
@@ -546,6 +569,19 @@
             "minReplicas": 0,
             "maxReplicas": 3,
             "rules": [
+              {
+                "name": "convert-queue",
+                "azureQueue": {
+                  "queueName": "[parameters('convertQueueName')]",
+                  "queueLength": 1,
+                  "auth": [
+                    {
+                      "secretRef": "storage-connection-string",
+                      "triggerParameter": "connection"
+                    }
+                  ]
+                }
+              },
               {
                 "name": "trim-queue",
                 "azureQueue": {
@@ -622,6 +658,10 @@
     "workerContainerAppName": {
       "type": "string",
       "value": "[variables('workerContainerAppName')]"
+    },
+    "convertQueueName": {
+      "type": "string",
+      "value": "[parameters('convertQueueName')]"
     },
     "trimQueueName": {
       "type": "string",

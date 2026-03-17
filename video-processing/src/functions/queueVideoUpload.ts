@@ -41,18 +41,18 @@ export async function queueVideoUploadHandler(event: EventGridEvent, context: In
   }
 
   const recordStore = getVideoRecordStore();
-  const queue = getProcessingQueue('trim');
+  const queue = getProcessingQueue('convert');
   const { created, record } = await recordStore.createFromUpload({
     containerName: blob.containerName,
     blobName: blob.blobName,
     blobUrl,
   });
 
-  const trimJobToken = randomUUID();
-  const trimJob: ProcessingJobMessage = {
+  const convertJobToken = randomUUID();
+  const convertJob: ProcessingJobMessage = {
     version: 1,
-    jobType: 'trim',
-    jobToken: trimJobToken,
+    jobType: 'convert',
+    jobToken: convertJobToken,
     recordId: record.recordId,
     sourceContainer: record.sourceContainer,
     sourceBlobName: record.sourceBlobName,
@@ -60,10 +60,10 @@ export async function queueVideoUploadHandler(event: EventGridEvent, context: In
 
   if (!created) {
     if (record.status === 'uploaded' && record.currentStage === 'ingest') {
-      await queue.enqueue(trimJob);
-      await recordStore.markQueued(record.recordId, 'trim', 0, trimJobToken);
+      await queue.enqueue(convertJob);
+      await recordStore.markQueued(record.recordId, 'convert', 0, convertJobToken);
 
-      context.log('queueVideoUpload recovered unqueued record and queued trim job', {
+      context.log('queueVideoUpload recovered unqueued record and queued convert job', {
         recordId: record.recordId,
         sourceBlobName: record.sourceBlobName,
       });
@@ -79,10 +79,10 @@ export async function queueVideoUploadHandler(event: EventGridEvent, context: In
     return;
   }
 
-  await queue.enqueue(trimJob);
-  await recordStore.markQueued(record.recordId, 'trim', 0, trimJobToken);
+  await queue.enqueue(convertJob);
+  await recordStore.markQueued(record.recordId, 'convert', 0, convertJobToken);
 
-  context.log('queueVideoUpload queued trim job', {
+  context.log('queueVideoUpload queued convert job', {
     recordId: record.recordId,
     sourceBlobName: record.sourceBlobName,
   });

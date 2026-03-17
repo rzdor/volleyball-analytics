@@ -91,33 +91,51 @@ export class VideoRecordStore {
 
   async markQueued(recordId: string, jobType: ProcessingJobType, retryCount = 0, jobToken?: string): Promise<string> {
     const queuedAt = new Date().toISOString();
-    const updates: Partial<VideoRecordEntity> = jobType === 'trim'
-      ? {
-          status: 'queued',
-          currentStage: 'trim',
-          queuedAt,
-          trimQueuedAt: queuedAt,
-          trimRetryCount: retryCount,
-          trimJobToken: jobToken,
-          trimErrorMessage: '',
-          trimFailedAt: '',
-          lastJobType: 'trim',
-          errorMessage: '',
-          failedAt: '',
-        }
-      : {
-          status: 'queued',
-          currentStage: 'detect',
-          queuedAt,
-          detectQueuedAt: queuedAt,
-          detectRetryCount: retryCount,
-          detectJobToken: jobToken,
-          detectErrorMessage: '',
-          detectFailedAt: '',
-          lastJobType: 'detect',
-          errorMessage: '',
-          failedAt: '',
-        };
+    let updates: Partial<VideoRecordEntity>;
+
+    if (jobType === 'convert') {
+      updates = {
+        status: 'queued',
+        currentStage: 'convert',
+        queuedAt,
+        convertQueuedAt: queuedAt,
+        convertRetryCount: retryCount,
+        convertJobToken: jobToken,
+        convertErrorMessage: '',
+        convertFailedAt: '',
+        lastJobType: 'convert',
+        errorMessage: '',
+        failedAt: '',
+      };
+    } else if (jobType === 'trim') {
+      updates = {
+        status: 'queued',
+        currentStage: 'trim',
+        queuedAt,
+        trimQueuedAt: queuedAt,
+        trimRetryCount: retryCount,
+        trimJobToken: jobToken,
+        trimErrorMessage: '',
+        trimFailedAt: '',
+        lastJobType: 'trim',
+        errorMessage: '',
+        failedAt: '',
+      };
+    } else {
+      updates = {
+        status: 'queued',
+        currentStage: 'detect',
+        queuedAt,
+        detectQueuedAt: queuedAt,
+        detectRetryCount: retryCount,
+        detectJobToken: jobToken,
+        detectErrorMessage: '',
+        detectFailedAt: '',
+        lastJobType: 'detect',
+        errorMessage: '',
+        failedAt: '',
+      };
+    }
 
     await this.update(recordId, updates);
     return queuedAt;
@@ -125,34 +143,79 @@ export class VideoRecordStore {
 
   async markProcessing(recordId: string, jobType: ProcessingJobType, retryCount = 0): Promise<string> {
     const startedAt = new Date().toISOString();
-    const updates: Partial<VideoRecordEntity> = jobType === 'trim'
-      ? {
-          status: 'processing',
-          currentStage: 'trim',
-          processingStartedAt: startedAt,
-          trimStartedAt: startedAt,
-          trimRetryCount: retryCount,
-          trimErrorMessage: '',
-          trimFailedAt: '',
-          lastJobType: 'trim',
-          errorMessage: '',
-          failedAt: '',
-        }
-      : {
-          status: 'processing',
-          currentStage: 'detect',
-          processingStartedAt: startedAt,
-          detectStartedAt: startedAt,
-          detectRetryCount: retryCount,
-          detectErrorMessage: '',
-          detectFailedAt: '',
-          lastJobType: 'detect',
-          errorMessage: '',
-          failedAt: '',
-        };
+    let updates: Partial<VideoRecordEntity>;
+
+    if (jobType === 'convert') {
+      updates = {
+        status: 'processing',
+        currentStage: 'convert',
+        processingStartedAt: startedAt,
+        convertStartedAt: startedAt,
+        convertRetryCount: retryCount,
+        convertErrorMessage: '',
+        convertFailedAt: '',
+        lastJobType: 'convert',
+        errorMessage: '',
+        failedAt: '',
+      };
+    } else if (jobType === 'trim') {
+      updates = {
+        status: 'processing',
+        currentStage: 'trim',
+        processingStartedAt: startedAt,
+        trimStartedAt: startedAt,
+        trimRetryCount: retryCount,
+        trimErrorMessage: '',
+        trimFailedAt: '',
+        lastJobType: 'trim',
+        errorMessage: '',
+        failedAt: '',
+      };
+    } else {
+      updates = {
+        status: 'processing',
+        currentStage: 'detect',
+        processingStartedAt: startedAt,
+        detectStartedAt: startedAt,
+        detectRetryCount: retryCount,
+        detectErrorMessage: '',
+        detectFailedAt: '',
+        lastJobType: 'detect',
+        errorMessage: '',
+        failedAt: '',
+      };
+    }
 
     await this.update(recordId, updates);
     return startedAt;
+  }
+
+  async markConvertCompletedAndQueueTrim(
+    recordId: string,
+    convertedBlobName: string,
+    convertedBlobUrl: string,
+    convertStartedAt: string,
+    trimJobToken: string
+  ): Promise<void> {
+    const now = new Date().toISOString();
+    await this.update(recordId, {
+      status: 'queued',
+      currentStage: 'trim',
+      lastJobType: 'trim',
+      convertedBlobName,
+      convertedBlobUrl,
+      queuedAt: now,
+      convertCompletedAt: now,
+      convertDurationMs: toDurationMs(convertStartedAt, now),
+      convertErrorMessage: '',
+      convertFailedAt: '',
+      trimQueuedAt: now,
+      trimJobToken,
+      trimErrorMessage: '',
+      trimFailedAt: '',
+      errorMessage: '',
+      failedAt: '',
+    });
   }
 
   async markTrimCompletedAndQueueDetect(
@@ -213,29 +276,45 @@ export class VideoRecordStore {
 
   async markFailed(recordId: string, jobType: ProcessingJobType, errorMessage: string, retryCount = 0): Promise<void> {
     const failedAt = new Date().toISOString();
-    const updates: Partial<VideoRecordEntity> = jobType === 'trim'
-      ? {
-          status: 'failed',
-          currentStage: 'failed',
-          lastJobType: 'trim',
-          failedAt,
-          trimFailedAt: failedAt,
-          trimRetryCount: retryCount,
-          trimJobToken: '',
-          trimErrorMessage: errorMessage,
-          errorMessage,
-        }
-      : {
-          status: 'failed',
-          currentStage: 'failed',
-          lastJobType: 'detect',
-          failedAt,
-          detectFailedAt: failedAt,
-          detectRetryCount: retryCount,
-          detectJobToken: '',
-          detectErrorMessage: errorMessage,
-          errorMessage,
-        };
+    let updates: Partial<VideoRecordEntity>;
+
+    if (jobType === 'convert') {
+      updates = {
+        status: 'failed',
+        currentStage: 'failed',
+        lastJobType: 'convert',
+        failedAt,
+        convertFailedAt: failedAt,
+        convertRetryCount: retryCount,
+        convertJobToken: '',
+        convertErrorMessage: errorMessage,
+        errorMessage,
+      };
+    } else if (jobType === 'trim') {
+      updates = {
+        status: 'failed',
+        currentStage: 'failed',
+        lastJobType: 'trim',
+        failedAt,
+        trimFailedAt: failedAt,
+        trimRetryCount: retryCount,
+        trimJobToken: '',
+        trimErrorMessage: errorMessage,
+        errorMessage,
+      };
+    } else {
+      updates = {
+        status: 'failed',
+        currentStage: 'failed',
+        lastJobType: 'detect',
+        failedAt,
+        detectFailedAt: failedAt,
+        detectRetryCount: retryCount,
+        detectJobToken: '',
+        detectErrorMessage: errorMessage,
+        errorMessage,
+      };
+    }
 
     await this.update(recordId, updates);
   }

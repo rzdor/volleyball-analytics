@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Video Details</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <a class="page-back-link" href="/">← Back to upload page</a>
+      <h1>🎥 Video Details</h1>
+      <p id="pageSubtitle">Loading video record...</p>
+    </header>
+
+    <main>
+      <div id="detailLoading" class="loading">
+        <div class="spinner"></div>
+        <p>Loading video details...</p>
+      </div>
+
+      <div id="detailError" class="results hidden">
+        <h2>Unable to load video details</h2>
+        <p id="detailErrorText"></p>
+      </div>
+
+      <div id="detailContent" class="results hidden">
+        <h2>📋 Video Summary</h2>
+        <p id="detailSummary"></p>
+
+        <div class="analysis-section">
+          <h3>Record facts</h3>
+          <div id="detailFacts" class="status-facts"></div>
+        </div>
+
+        <div class="analysis-section">
+          <h3>Pipeline stages</h3>
+          <div id="detailStages" class="status-stages"></div>
+        </div>
+
+        <div class="analysis-section">
+          <h3>Available files</h3>
+          <div id="assetLinks" class="asset-list"></div>
+        </div>
+
+        <div class="analysis-section">
+          <h3>Split scene parts</h3>
+          <ul id="sceneList" class="video-list"></ul>
+        </div>
+
+        <div class="analysis-section">
+          <h3>Player detection summary</h3>
+          <div id="detectionFacts" class="status-facts"></div>
+        </div>
+
+        <video id="detailPreview" controls class="processed-video hidden"></video>
+      </div>
+    </main>
+  </div>
+
+  <script src="/video.js"></script>
+</body>
+</html>

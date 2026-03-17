@@ -15,6 +15,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const statusFacts = document.getElementById('statusFacts');
   const statusStages = document.getElementById('statusStages');
   const statusError = document.getElementById('statusError');
+  const detailsLink = document.getElementById('detailsLink');
   const downloadLink = document.getElementById('downloadLink');
   const detectionLink = document.getElementById('detectionLink');
   const processedPreview = document.getElementById('processedPreview');
@@ -221,6 +222,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderPendingStatus(result) {
     statusSummary.textContent = 'Upload complete. Waiting for the processing pipeline to pick up this video.';
+    updateDetailsLink(result.recordId || null);
     renderStatusFacts([
       ['Record ID', result.recordId || 'Pending'],
       ['Blob', result.blobName || 'Pending'],
@@ -228,7 +230,8 @@ document.addEventListener('DOMContentLoaded', () => {
     ]);
     renderStatusStages([
       { label: 'Upload accepted', state: 'done', detail: 'Stored in Blob Storage.' },
-      { label: 'Trim queued', state: 'active', detail: 'Waiting for ingestion/status record.' },
+      { label: 'Convert to 720p', state: 'active', detail: 'Waiting for ingestion/status record.' },
+      { label: 'Trim and split scenes', state: 'todo', detail: 'Will start after conversion completes.' },
       { label: 'Detect players', state: 'todo', detail: 'Will start after trim completes.' },
       { label: 'Completed', state: 'todo', detail: 'Outputs will appear here.' }
     ]);
@@ -297,6 +300,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function renderVideoStatus(status) {
+    updateDetailsLink(status.recordId || null);
     const summary = [];
     summary.push(`Stage: ${formatStage(status.currentStage)}`);
     summary.push(`Status: ${formatStatus(status.status)}`);
@@ -338,7 +342,12 @@ document.addEventListener('DOMContentLoaded', () => {
         detail: formatDateTime(status.uploadedAt)
       },
       {
-        label: 'Trim stage',
+        label: 'Convert to 720p',
+        state: getStageState(status, 'convert'),
+        detail: describeStage(status.convert)
+      },
+      {
+        label: 'Trim and split scenes',
         state: getStageState(status, 'trim'),
         detail: describeStage(status.trim)
       },
@@ -405,18 +414,44 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  function updateDetailsLink(recordId) {
+    if (!detailsLink || !recordId) {
+      detailsLink?.removeAttribute('href');
+      detailsLink?.classList.add('hidden');
+      return;
+    }
+
+    detailsLink.href = `/videos/${encodeURIComponent(recordId)}`;
+    detailsLink.classList.remove('hidden');
+  }
+
   function getStageState(status, stageName) {
     if (status.status === 'failed' && status.currentStage === 'failed') {
-      const failedStage = status.detect && (status.detect.failedAt || status.detect.errorMessage) ? 'detect' : 'trim';
-      return failedStage === stageName ? 'blocked' : stageName === 'trim' && status.trim && status.trim.completedAt ? 'done' : 'todo';
+      const failedStage = getFailedStageName(status);
+      if (failedStage === stageName) {
+        return 'blocked';
+      }
+
+      const stage = status[stageName];
+      return stage && stage.completedAt ? 'done' : 'todo';
     }
 
     const stage = status[stageName];
     if (stage && stage.completedAt) return 'done';
     if (status.currentStage === stageName && status.status === 'processing') return 'active';
     if (status.currentStage === stageName && status.status === 'queued') return 'active';
+    if (stageName === 'trim' && status.convert && status.convert.completedAt) return 'active';
     if (stageName === 'detect' && status.trim && status.trim.completedAt) return 'active';
     return 'todo';
+  }
+
+  function getFailedStageName(status) {
+    const orderedStages = ['detect', 'trim', 'convert'];
+
+    return orderedStages.find((stageName) => {
+      const stage = status[stageName];
+      return stage && (stage.failedAt || stage.errorMessage);
+    }) || 'convert';
   }
 
   function describeStage(stage) {
@@ -533,7 +568,19 @@ document.addEventListener('DOMContentLoaded', () => {
         li.appendChild(download);
       }
 
+      if (item.detailUrl) {
+        const detail = document.createElement('a');
+        detail.href = item.detailUrl;
+        detail.textContent = 'Details';
+        detail.className = 'video-download-link';
+        detail.style.marginLeft = '0.5rem';
+        li.appendChild(detail);
+      }
+
       const metaParts = [];
+      if (item.status && item.currentStage) {
+        metaParts.push(`${formatStatus(item.status)} / ${formatStage(item.currentStage)}`);
+      }
       if (typeof item.size === 'number') {
         metaParts.push(formatFileSize(item.size));
       }

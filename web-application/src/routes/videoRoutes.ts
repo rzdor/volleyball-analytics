@@ -5,7 +5,12 @@ import fs from 'fs';
 import { createHash, randomUUID } from 'crypto';
 import rateLimit from 'express-rate-limit';
 import { TableClient } from '@azure/data-tables';
-import { BlobServiceClient } from '@azure/storage-blob';
+import {
+  BlobSASPermissions,
+  BlobServiceClient,
+  StorageSharedKeyCredential,
+  generateBlobSASQueryParameters,
+} from '@azure/storage-blob';
 
 const router = Router();
 
@@ -31,6 +36,13 @@ type VideoStatusRecord = {
   processingStartedAt?: string;
   completedAt?: string;
   failedAt?: string;
+  convertQueuedAt?: string;
+  convertStartedAt?: string;
+  convertCompletedAt?: string;
+  convertFailedAt?: string;
+  convertDurationMs?: number;
+  convertRetryCount?: number;
+  convertErrorMessage?: string;
   trimQueuedAt?: string;
   trimStartedAt?: string;
   trimCompletedAt?: string;
@@ -45,6 +57,8 @@ type VideoStatusRecord = {
   detectDurationMs?: number;
   detectRetryCount?: number;
   detectErrorMessage?: string;
+  convertedBlobName?: string;
+  convertedBlobUrl?: string;
   processedBlobName?: string;
   processedBlobUrl?: string;
   processedOutputFolder?: string;
@@ -52,6 +66,22 @@ type VideoStatusRecord = {
   detectionBlobName?: string;
   detectionBlobUrl?: string;
   errorMessage?: string;
+};
+
+type BlobAsset = {
+  name: string;
+  blobName: string;
+  url: string;
+  downloadUrl: string;
+  size?: number;
+  lastModified?: string;
+};
+
+type DetectionSummary = {
+  playerCount: number;
+  peakPlayersInFrame: number;
+  sampledFrames: number;
+  teamCount: number;
 };
 
 function getMaxVideoBytes(): number {
@@ -74,19 +104,234 @@ function formatBytes(bytes: number): string {
 }
 
 function getBlobServiceClient(): BlobServiceClient {
-  const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
-  if (!connectionString) {
-    throw new Error('AZURE_STORAGE_CONNECTION_STRING is not configured');
-  }
-  return BlobServiceClient.fromConnectionString(connectionString);
+  return BlobServiceClient.fromConnectionString(getStorageConnectionString());
 }
 
 function getTableClient(): TableClient {
+  return TableClient.fromConnectionString(getStorageConnectionString(), VIDEO_RECORDS_TABLE_NAME);
+}
+
+function getStorageConnectionString(): string {
   const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
   if (!connectionString) {
     throw new Error('AZURE_STORAGE_CONNECTION_STRING is not configured');
   }
-  return TableClient.fromConnectionString(connectionString, VIDEO_RECORDS_TABLE_NAME);
+  return connectionString;
+}
+
+function parseConnectionStringEntries(connectionString: string): Record<string, string> {
+  return connectionString.split(';').reduce<Record<string, string>>((acc, part) => {
+    const index = part.indexOf('=');
+    if (index === -1) {
+      return acc;
+    }
+
+    const key = part.slice(0, index);
+    const value = part.slice(index + 1);
+    if (key && value) {
+      acc[key] = value;
+    }
+    return acc;
+  }, {});
+}
+
+function parseSharedKey(connectionString: string): StorageSharedKeyCredential | undefined {
+  const entries = parseConnectionStringEntries(connectionString);
+  const accountName = entries.AccountName;
+  const accountKey = entries.AccountKey;
+
+  if (!accountName || !accountKey) {
+    return undefined;
+  }
+
+  return new StorageSharedKeyCredential(accountName, accountKey);
+}
+
+function getBlobContainerClient(containerName = BLOB_CONTAINER) {
+  return getBlobServiceClient().getContainerClient(containerName);
+}
+
+function createBlobUrl(containerName: string, blobName: string, asAttachment = false, downloadName?: string): string {
+  const connectionString = getStorageConnectionString();
+  const containerClient = getBlobContainerClient(containerName);
+  const blobClient = containerClient.getBlobClient(blobName);
+  const sharedKey = parseSharedKey(connectionString);
+
+  if (!sharedKey) {
+    return blobClient.url;
+  }
+
+  const startsOn = new Date();
+  const expiresOn = new Date(startsOn.getTime() + 60 * 60 * 1000);
+  const sas = generateBlobSASQueryParameters({
+    containerName,
+    blobName,
+    permissions: BlobSASPermissions.parse('r'),
+    startsOn,
+    expiresOn,
+    contentDisposition: asAttachment
+      ? `attachment; filename="${downloadName ?? path.basename(blobName)}"`
+      : undefined,
+  }, sharedKey).toString();
+
+  return `${blobClient.url}?${sas}`;
+}
+
+function buildBlobAsset(containerName: string, blobName: string, size?: number, lastModified?: Date): BlobAsset {
+  return {
+    name: path.basename(blobName),
+    blobName,
+    url: createBlobUrl(containerName, blobName),
+    downloadUrl: createBlobUrl(containerName, blobName, true),
+    size,
+    lastModified: lastModified?.toISOString(),
+  };
+}
+
+async function readStreamAsString(stream: NodeJS.ReadableStream | undefined): Promise<string> {
+  if (!stream) {
+    return '';
+  }
+
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+async function getVideoRecord(recordId: string): Promise<VideoStatusRecord | undefined> {
+  const tableClient = getTableClient();
+
+  try {
+    return await tableClient.getEntity<VideoStatusRecord>('video', recordId);
+  } catch (error) {
+    if (typeof error === 'object' && error !== null && 'statusCode' in error && Number((error as { statusCode?: number }).statusCode) === 404) {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+function mapStatusResponse(record: VideoStatusRecord) {
+  return {
+    recordId: record.recordId,
+    status: record.status,
+    currentStage: record.currentStage,
+    sourceContainer: record.sourceContainer,
+    sourceBlobName: record.sourceBlobName,
+    sourceBlobUrl: record.sourceBlobUrl,
+    uploadedAt: record.uploadedAt,
+    updatedAt: record.updatedAt,
+    queuedAt: record.queuedAt,
+    processingStartedAt: record.processingStartedAt,
+    completedAt: record.completedAt,
+    failedAt: record.failedAt,
+    errorMessage: record.errorMessage,
+    convertedBlobName: record.convertedBlobName,
+    convertedBlobUrl: record.convertedBlobUrl,
+    processedBlobName: record.processedBlobName,
+    processedBlobUrl: record.processedBlobUrl,
+    processedOutputFolder: record.processedOutputFolder,
+    processedSceneCount: record.processedSceneCount,
+    detectionBlobName: record.detectionBlobName,
+    detectionBlobUrl: record.detectionBlobUrl,
+    convert: {
+      queuedAt: record.convertQueuedAt,
+      startedAt: record.convertStartedAt,
+      completedAt: record.convertCompletedAt,
+      failedAt: record.convertFailedAt,
+      durationMs: record.convertDurationMs,
+      retryCount: record.convertRetryCount ?? 0,
+      errorMessage: record.convertErrorMessage,
+    },
+    trim: {
+      queuedAt: record.trimQueuedAt,
+      startedAt: record.trimStartedAt,
+      completedAt: record.trimCompletedAt,
+      failedAt: record.trimFailedAt,
+      durationMs: record.trimDurationMs,
+      retryCount: record.trimRetryCount ?? 0,
+      errorMessage: record.trimErrorMessage,
+    },
+    detect: {
+      queuedAt: record.detectQueuedAt,
+      startedAt: record.detectStartedAt,
+      completedAt: record.detectCompletedAt,
+      failedAt: record.detectFailedAt,
+      durationMs: record.detectDurationMs,
+      retryCount: record.detectRetryCount ?? 0,
+      errorMessage: record.detectErrorMessage,
+    },
+  };
+}
+
+async function listProcessedAssets(record: VideoStatusRecord): Promise<BlobAsset[]> {
+  const prefix = `processed/${record.recordId}/`;
+  const containerClient = getBlobContainerClient(record.sourceContainer);
+  const assets: BlobAsset[] = [];
+
+  for await (const blob of containerClient.listBlobsFlat({ prefix })) {
+    assets.push(buildBlobAsset(
+      record.sourceContainer,
+      blob.name,
+      blob.properties.contentLength,
+      blob.properties.lastModified
+    ));
+  }
+
+  return assets.sort((left, right) => left.name.localeCompare(right.name));
+}
+
+async function loadDetectionSummary(record: VideoStatusRecord): Promise<DetectionSummary | undefined> {
+  if (!record.detectionBlobName) {
+    return undefined;
+  }
+
+  const blobClient = getBlobContainerClient(record.sourceContainer).getBlobClient(record.detectionBlobName);
+  const response = await blobClient.download();
+  const raw = await readStreamAsString(response.readableStreamBody);
+  if (!raw) {
+    return undefined;
+  }
+
+  const detection = JSON.parse(raw) as {
+    sampledFrames?: number;
+    teams?: Array<{ id?: number }>;
+    tracks?: Array<{ trackId?: number }>;
+    frames?: Array<{ players?: Array<{ trackId?: number }> }>;
+  };
+
+  const trackIds = new Set<number>();
+  if (Array.isArray(detection.tracks)) {
+    for (const track of detection.tracks) {
+      if (typeof track.trackId === 'number' && track.trackId >= 0) {
+        trackIds.add(track.trackId);
+      }
+    }
+  }
+
+  let peakPlayersInFrame = 0;
+  if (Array.isArray(detection.frames)) {
+    for (const frame of detection.frames) {
+      const framePlayers = Array.isArray(frame.players) ? frame.players : [];
+      peakPlayersInFrame = Math.max(peakPlayersInFrame, framePlayers.length);
+      for (const player of framePlayers) {
+        if (typeof player.trackId === 'number' && player.trackId >= 0) {
+          trackIds.add(player.trackId);
+        }
+      }
+    }
+  }
+
+  return {
+    playerCount: trackIds.size > 0 ? trackIds.size : peakPlayersInFrame,
+    peakPlayersInFrame,
+    sampledFrames: typeof detection.sampledFrames === 'number'
+      ? detection.sampledFrames
+      : Array.isArray(detection.frames) ? detection.frames.length : 0,
+    teamCount: Array.isArray(detection.teams) ? detection.teams.length : 0,
+  };
 }
 
 function buildVideoRecordId(containerName: string, blobName: string): string {
@@ -196,80 +441,105 @@ router.get('/status/:recordId', rateLimit({ windowMs: 60_000, limit: 120, standa
       return;
     }
 
-    const tableClient = getTableClient();
-    let record: VideoStatusRecord;
-
-    try {
-      record = await tableClient.getEntity<VideoStatusRecord>('video', recordId);
-    } catch (error) {
-      if (typeof error === 'object' && error !== null && 'statusCode' in error && Number((error as { statusCode?: number }).statusCode) === 404) {
-        res.status(404).json({ error: 'Video status not found yet', recordId });
-        return;
-      }
-      throw error;
+    const record = await getVideoRecord(recordId);
+    if (!record) {
+      res.status(404).json({ error: 'Video status not found yet', recordId });
+      return;
     }
 
-    res.json({
-      recordId: record.recordId,
-      status: record.status,
-      currentStage: record.currentStage,
-      sourceContainer: record.sourceContainer,
-      sourceBlobName: record.sourceBlobName,
-      sourceBlobUrl: record.sourceBlobUrl,
-      uploadedAt: record.uploadedAt,
-      updatedAt: record.updatedAt,
-      queuedAt: record.queuedAt,
-      processingStartedAt: record.processingStartedAt,
-      completedAt: record.completedAt,
-      failedAt: record.failedAt,
-      errorMessage: record.errorMessage,
-      processedBlobName: record.processedBlobName,
-      processedBlobUrl: record.processedBlobUrl,
-      processedOutputFolder: record.processedOutputFolder,
-      processedSceneCount: record.processedSceneCount,
-      detectionBlobName: record.detectionBlobName,
-      detectionBlobUrl: record.detectionBlobUrl,
-      trim: {
-        queuedAt: record.trimQueuedAt,
-        startedAt: record.trimStartedAt,
-        completedAt: record.trimCompletedAt,
-        failedAt: record.trimFailedAt,
-        durationMs: record.trimDurationMs,
-        retryCount: record.trimRetryCount ?? 0,
-        errorMessage: record.trimErrorMessage,
-      },
-      detect: {
-        queuedAt: record.detectQueuedAt,
-        startedAt: record.detectStartedAt,
-        completedAt: record.detectCompletedAt,
-        failedAt: record.detectFailedAt,
-        durationMs: record.detectDurationMs,
-        retryCount: record.detectRetryCount ?? 0,
-        errorMessage: record.detectErrorMessage,
-      },
-    });
+    res.json(mapStatusResponse(record));
   } catch (error) {
     console.error('Status error:', error);
     res.status(500).json({ error: 'Failed to load video status' });
   }
 });
 
-router.get('/list', async (_req: Request, res: Response): Promise<void> => {
+router.get('/:recordId/details', rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: true, legacyHeaders: false }), async (req: Request, res: Response): Promise<void> => {
   try {
-    const blobService = getBlobServiceClient();
-    const containerClient = blobService.getContainerClient(BLOB_CONTAINER);
-    const videos: { name: string; url: string; createdOn?: Date }[] = [];
-
-    for await (const blob of containerClient.listBlobsFlat({ prefix: `${BLOB_FOLDER}/` })) {
-      const blobClient = containerClient.getBlobClient(blob.name);
-      videos.push({
-        name: blob.name.replace(`${BLOB_FOLDER}/`, ''),
-        url: blobClient.url,
-        createdOn: blob.properties.createdOn,
-      });
+    const recordIdParam = req.params.recordId;
+    const recordId = typeof recordIdParam === 'string' ? recordIdParam.trim() : '';
+    if (!recordId) {
+      res.status(400).json({ error: 'recordId is required' });
+      return;
     }
 
-    res.json({ videos });
+    const record = await getVideoRecord(recordId);
+    if (!record) {
+      res.status(404).json({ error: 'Video details not found', recordId });
+      return;
+    }
+
+    const processedAssets = await listProcessedAssets(record);
+    const convertedVideo = record.convertedBlobName
+      ? buildBlobAsset(record.sourceContainer, record.convertedBlobName)
+      : undefined;
+    const trimmedVideo = record.processedBlobName
+      ? buildBlobAsset(record.sourceContainer, record.processedBlobName)
+      : undefined;
+    const detectionFile = record.detectionBlobName
+      ? buildBlobAsset(record.sourceContainer, record.detectionBlobName)
+      : undefined;
+    const sourceVideo = buildBlobAsset(record.sourceContainer, record.sourceBlobName);
+    const splitParts = processedAssets.filter(asset =>
+      asset.blobName !== record.convertedBlobName && asset.blobName !== record.processedBlobName
+    );
+    const detectionSummary = await loadDetectionSummary(record);
+
+    res.json({
+      ...mapStatusResponse(record),
+      sourceVideo,
+      convertedVideo,
+      trimmedVideo,
+      splitParts,
+      detectionFile,
+      detectionSummary,
+    });
+  } catch (error) {
+    console.error('Video details error:', error);
+    res.status(500).json({ error: 'Failed to load video details' });
+  }
+});
+
+router.get('/list', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const tableClient = getTableClient();
+    const records: VideoStatusRecord[] = [];
+
+    for await (const entity of tableClient.listEntities<VideoStatusRecord>()) {
+      records.push(entity);
+    }
+
+    records.sort((left, right) => {
+      const leftTime = new Date(left.uploadedAt ?? 0).getTime();
+      const rightTime = new Date(right.uploadedAt ?? 0).getTime();
+      return rightTime - leftTime;
+    });
+
+    const uploads = records.map(record => ({
+      name: record.sourceBlobName.replace(/^input\//, ''),
+      url: createBlobUrl(record.sourceContainer, record.sourceBlobName),
+      downloadUrl: createBlobUrl(record.sourceContainer, record.sourceBlobName, true),
+      detailUrl: `/videos/${encodeURIComponent(record.recordId)}`,
+      lastModified: record.updatedAt,
+      status: record.status,
+      currentStage: record.currentStage,
+      recordId: record.recordId,
+    }));
+
+    const processed = records
+      .filter(record => Boolean(record.processedBlobName))
+      .map(record => ({
+        name: record.processedBlobName ? path.basename(record.processedBlobName) : record.recordId,
+        url: createBlobUrl(record.sourceContainer, record.processedBlobName!),
+        downloadUrl: createBlobUrl(record.sourceContainer, record.processedBlobName!, true),
+        detailUrl: `/videos/${encodeURIComponent(record.recordId)}`,
+        lastModified: record.updatedAt,
+        status: record.status,
+        currentStage: record.currentStage,
+        recordId: record.recordId,
+      }));
+
+    res.json({ uploads, processed });
   } catch (error) {
     console.error('List error:', error);
     res.status(500).json({ error: 'Failed to list videos' });

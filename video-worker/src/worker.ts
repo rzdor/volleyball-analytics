@@ -8,9 +8,11 @@ import { downloadBlobToFile } from './services/blobUtils';
 import { getProcessingQueue, ProcessingQueueName } from './services/processingQueue';
 import { createVideoStorage } from './services/storageProvider';
 import { NoSegmentsDetectedError, runTrimPipeline } from './services/trimPipeline';
+import { convertVideoTo720p } from './services/videoConverter';
 import { getVideoRecordStore } from './services/videoRecordStore';
 import { ProcessingJobMessage } from './types/processing';
 
+const convertQueue = getProcessingQueue('convert');
 const trimQueue = getProcessingQueue('trim');
 const detectQueue = getProcessingQueue('detect');
 const recordStore = getVideoRecordStore();
@@ -68,18 +70,76 @@ function getStageJobToken(jobType: ProcessingJobMessage['jobType'], record: Awai
     return undefined;
   }
 
+  if (jobType === 'convert') {
+    return record.convertJobToken;
+  }
+
   return jobType === 'trim' ? record.trimJobToken : record.detectJobToken;
 }
 
-async function runTrimJob(job: ProcessingJobMessage, retryCount: number): Promise<void> {
-  const trimStartedAt = await recordStore.markProcessing(job.recordId, 'trim', retryCount);
+async function runConvertJob(job: ProcessingJobMessage, retryCount: number): Promise<void> {
+  const convertStartedAt = await recordStore.markProcessing(job.recordId, 'convert', retryCount);
+  const tempInputPath = getTempVideoPath('convert', job.sourceBlobName);
+  const sourceBaseName = path.basename(job.sourceBlobName, path.extname(job.sourceBlobName));
+  const convertedFilename = path.posix.join(job.recordId, `${sourceBaseName}-720p.mp4`);
+  const localConvertedPath = path.join(storage.getLocalOutputDir(), convertedFilename);
 
-  const tempInputPath = getTempVideoPath('trim', job.sourceBlobName);
+  fs.mkdirSync(path.dirname(localConvertedPath), { recursive: true });
 
   try {
     await downloadBlobToFile({
       containerName: job.sourceContainer,
       blobName: job.sourceBlobName,
+    }, tempInputPath);
+
+    await convertVideoTo720p(tempInputPath, localConvertedPath);
+
+    const storedConverted = await storage.saveOutput(localConvertedPath, convertedFilename);
+    const convertedBlobName = `processed/${storedConverted.name}`;
+    const trimJob: ProcessingJobMessage = {
+      version: 1,
+      jobType: 'trim',
+      jobToken: randomUUID(),
+      recordId: job.recordId,
+      sourceContainer: job.sourceContainer,
+      sourceBlobName: job.sourceBlobName,
+      convertedBlobName,
+    };
+
+    await trimQueue.enqueue(trimJob);
+    await recordStore.markConvertCompletedAndQueueTrim(
+      job.recordId,
+      convertedBlobName,
+      storedConverted.url,
+      convertStartedAt,
+      trimJob.jobToken
+    );
+
+    console.log('[worker] Convert job completed', {
+      recordId: job.recordId,
+      convertedBlobName,
+      trimJobToken: trimJob.jobToken,
+    });
+  } finally {
+    if (fs.existsSync(tempInputPath)) {
+      fs.unlinkSync(tempInputPath);
+    }
+
+    if (storage.isRemoteStorage() && fs.existsSync(localConvertedPath)) {
+      fs.unlinkSync(localConvertedPath);
+    }
+  }
+}
+
+async function runTrimJob(job: ProcessingJobMessage, retryCount: number): Promise<void> {
+  const trimStartedAt = await recordStore.markProcessing(job.recordId, 'trim', retryCount);
+  const trimInputBlobName = job.convertedBlobName ?? job.sourceBlobName;
+  const tempInputPath = getTempVideoPath('trim', trimInputBlobName);
+
+  try {
+    await downloadBlobToFile({
+      containerName: job.sourceContainer,
+      blobName: trimInputBlobName,
     }, tempInputPath);
 
     const sourceBaseName = path.basename(job.sourceBlobName, path.extname(job.sourceBlobName));
@@ -100,6 +160,7 @@ async function runTrimJob(job: ProcessingJobMessage, retryCount: number): Promis
       recordId: job.recordId,
       sourceContainer: job.sourceContainer,
       sourceBlobName: job.sourceBlobName,
+      convertedBlobName: job.convertedBlobName,
       processedBlobName,
     };
 
@@ -192,6 +253,11 @@ async function handleMessage(message: DequeuedMessageItem, queueName: Processing
       return;
     }
 
+    if (job.jobType === 'convert' && (record.convertedBlobName || record.currentStage === 'trim' || record.currentStage === 'detect' || record.currentStage === 'completed' || record.status === 'completed')) {
+      console.log('[worker] Skipping duplicate convert job', { recordId: job.recordId });
+      return;
+    }
+
     if (job.jobType === 'trim' && (record.processedBlobName || record.currentStage === 'detect' || record.currentStage === 'completed' || record.status === 'completed')) {
       console.log('[worker] Skipping duplicate trim job', { recordId: job.recordId });
       return;
@@ -213,7 +279,9 @@ async function handleMessage(message: DequeuedMessageItem, queueName: Processing
       return;
     }
 
-    if (job.jobType === 'trim') {
+    if (job.jobType === 'convert') {
+      await runConvertJob(job, retryCount);
+    } else if (job.jobType === 'trim') {
       await runTrimJob(job, retryCount);
     } else {
       await runDetectJob(job, retryCount);
@@ -242,6 +310,14 @@ async function runWorker(): Promise<void> {
     if (detectMessages.length > 0) {
       for (const message of detectMessages) {
         await handleMessage(message, 'detect');
+      }
+      continue;
+    }
+
+    const convertMessages = await convertQueue.receive(1, visibilityTimeoutSeconds);
+    if (convertMessages.length > 0) {
+      for (const message of convertMessages) {
+        await handleMessage(message, 'convert');
       }
       continue;
     }

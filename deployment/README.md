@@ -27,7 +27,8 @@ Creates all Azure resources needed to run the project.
 | Blob Container (`coordination`) | — | Reserved for coordination/auxiliary assets |
 | Blob Container (`detections`) | — | Player detection results (JSON) |
 | Azure Table (`videoprocessingrecords`) | — | Tracks one record per uploaded video and processing state |
-| Azure Queue (`video-trim-jobs`) | — | Buffers trim jobs for the worker |
+| Azure Queue (`video-convert-jobs`) | — | Buffers 720p conversion jobs for the worker |
+| Azure Queue (`video-trim-jobs`) | — | Buffers trim/split jobs after conversion succeeds |
 | Azure Queue (`video-detect-jobs`) | — | Buffers detect jobs after trim succeeds |
 | Azure Container Registry | Basic | Hosts Function App Docker images |
 | App Service Plan (Functions) | Basic B1, Linux | Hosts the containerized ingestion Function App |
@@ -45,11 +46,11 @@ code is running** — EventGrid validates the function endpoint exists.
 | Resource | Purpose |
 |---|---|
 | EventGrid System Topic | Captures blob events from the storage account |
-| EventGrid Subscription (`queue-upload-on-input`) | Routes `BlobCreated` and `BlobRenamed` events for `volleyball-videos/input/` to `queueVideoUploadBlob`, which creates the Table record and enqueues the first trim job using the retry policy defined in `eventgrid.json` (`maxDeliveryAttempts: 3` in the current template) |
+| EventGrid Subscription (`queue-upload-on-input`) | Routes `BlobCreated` and `BlobRenamed` events for `volleyball-videos/input/` to `queueVideoUploadBlob`, which creates the Table record and enqueues the first convert job using the retry policy defined in `eventgrid.json` (`maxDeliveryAttempts: 3` in the current template) |
 
 Queue messages are also handled as single-attempt work items by the worker: on any processing exception the record is marked `failed` and the message is deleted, and if Azure Queue Storage redelivers a message later it is marked failed instead of being retried.
 
-After trim completes, the worker now stores the consolidated trimmed video and each individual scene clip under `processed/{recordId}/` in Blob Storage. The detect stage still consumes the full trimmed video from that folder.
+After ingestion, the worker first normalizes the source video to 720p and stores that converted asset under `processed/{recordId}/`. The trim stage then uses the converted blob, writes the consolidated trimmed video plus each individual scene clip under the same `processed/{recordId}/` folder, and the detect stage consumes the full trimmed video from that folder.
 
 `BlobRenamed` is emitted only by storage features that support rename events (for example ADLS Gen2 hierarchical namespace or SFTP rename). When those events are available, the function now uses the rename destination URL and only processes files whose final path is under `input/`.
 
@@ -138,7 +139,8 @@ az deployment group create \
 | `coordinationBlobContainerName` | `coordination` | Blob container for logs/metadata |
 | `detectionsBlobContainerName` | `detections` | Blob container for detection results |
 | `videoRecordsTableName` | `videoprocessingrecords` | Azure Table used for per-video processing state |
-| `trimQueueName` | `video-trim-jobs` | Queue consumed by the worker for trim jobs |
+| `convertQueueName` | `video-convert-jobs` | Queue consumed by the worker for 720p conversion jobs |
+| `trimQueueName` | `video-trim-jobs` | Queue consumed by the worker for trim/split jobs |
 | `detectQueueName` | `video-detect-jobs` | Queue consumed by the worker for detect jobs |
 | `videoUploadMaxBytes` | `5368709120` | Maximum upload size for the web app in bytes (default 5 GB) |
 

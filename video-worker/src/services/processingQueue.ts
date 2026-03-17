@@ -1,8 +1,9 @@
 import { DequeuedMessageItem, QueueClient } from '@azure/storage-queue';
 import { ProcessingJobMessage } from '../types/processing';
 
-export type ProcessingQueueName = 'trim' | 'detect';
+export type ProcessingQueueName = 'convert' | 'trim' | 'detect';
 
+const DEFAULT_CONVERT_QUEUE_NAME = 'video-convert-jobs';
 const DEFAULT_TRIM_QUEUE_NAME = 'video-trim-jobs';
 const DEFAULT_DETECT_QUEUE_NAME = 'video-detect-jobs';
 
@@ -15,6 +16,10 @@ function getStorageConnectionString(): string {
 }
 
 function getQueueName(queueName: ProcessingQueueName): string {
+  if (queueName === 'convert') {
+    return process.env.VIDEO_CONVERT_QUEUE_NAME ?? DEFAULT_CONVERT_QUEUE_NAME;
+  }
+
   if (queueName === 'detect') {
     return process.env.VIDEO_DETECT_QUEUE_NAME ?? DEFAULT_DETECT_QUEUE_NAME;
   }
