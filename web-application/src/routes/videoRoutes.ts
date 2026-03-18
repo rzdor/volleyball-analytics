@@ -2,8 +2,6 @@ import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
-import http from 'http';
-import https from 'https';
 import { createHash, randomUUID } from 'crypto';
 import rateLimit from 'express-rate-limit';
 import { TableClient } from '@azure/data-tables';
@@ -27,6 +25,7 @@ type VideoStatusRecord = {
   partitionKey: string;
   rowKey: string;
   recordId: string;
+  requestedVideoUrl?: string;
   sourceContainer: string;
   sourceBlobName: string;
   sourceBlobUrl: string;
@@ -38,6 +37,13 @@ type VideoStatusRecord = {
   processingStartedAt?: string;
   completedAt?: string;
   failedAt?: string;
+  importQueuedAt?: string;
+  importStartedAt?: string;
+  importCompletedAt?: string;
+  importFailedAt?: string;
+  importDurationMs?: number;
+  importRetryCount?: number;
+  importErrorMessage?: string;
   convertQueuedAt?: string;
   convertStartedAt?: string;
   convertCompletedAt?: string;
@@ -107,24 +113,6 @@ type PlayerManifestRecord = {
   }>;
 };
 
-const ALLOWED_REMOTE_VIDEO_MIME_TYPES = [
-  'video/mp4',
-  'video/webm',
-  'video/quicktime',
-  'video/x-msvideo',
-] as const;
-
-const ALLOWED_REMOTE_VIDEO_EXTENSIONS = ['.mp4', '.webm', '.mov', '.avi'] as const;
-
-class VideoDownloadError extends Error {
-  statusCode: number;
-
-  constructor(message: string, statusCode = 400) {
-    super(message);
-    this.statusCode = statusCode;
-  }
-}
-
 function getMaxVideoBytes(): number {
   const configured = Number.parseInt(process.env.VIDEO_UPLOAD_MAX_BYTES ?? '', 10);
   return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_MAX_VIDEO_BYTES;
@@ -144,136 +132,41 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(precision)} ${units[unitIndex]}`;
 }
 
-function inferRemoteExtension(url: URL, contentType?: string): string {
-  const ext = path.extname(url.pathname).toLowerCase();
-  if (ALLOWED_REMOTE_VIDEO_EXTENSIONS.includes(ext as typeof ALLOWED_REMOTE_VIDEO_EXTENSIONS[number])) {
-    return ext;
-  }
-
-  if (contentType) {
-    if (contentType.includes('webm')) return '.webm';
-    if (contentType.includes('quicktime')) return '.mov';
-    if (contentType.includes('x-msvideo')) return '.avi';
-  }
-
-  return '.mp4';
+function getVideoUrlImportFunctionUrl(): string {
+  return process.env.VIDEO_URL_IMPORT_FUNCTION_URL ?? 'http://127.0.0.1:7071/api/videos/import-from-url';
 }
 
-function isAllowedRemoteVideo(contentType: string | undefined, ext: string): boolean {
-  const normalizedType = contentType ? contentType.split(';')[0].trim().toLowerCase() : '';
+class VideoImportRequestError extends Error {
+  statusCode: number;
 
-  if (normalizedType) {
-    if (normalizedType.startsWith('video/') || ALLOWED_REMOTE_VIDEO_MIME_TYPES.includes(normalizedType as typeof ALLOWED_REMOTE_VIDEO_MIME_TYPES[number])) {
-      return true;
-    }
-
-    if (normalizedType === 'application/octet-stream' && ALLOWED_REMOTE_VIDEO_EXTENSIONS.includes(ext as typeof ALLOWED_REMOTE_VIDEO_EXTENSIONS[number])) {
-      return true;
-    }
-
-    return false;
+  constructor(message: string, statusCode: number) {
+    super(message);
+    this.statusCode = statusCode;
   }
-
-  return ALLOWED_REMOTE_VIDEO_EXTENSIONS.includes(ext as typeof ALLOWED_REMOTE_VIDEO_EXTENSIONS[number]);
 }
 
-async function downloadVideoFromUrl(
-  videoUrl: string,
-  destinationDir: string,
-  maxBytes = MAX_VIDEO_BYTES,
-  redirectsLeft = 2
-): Promise<string> {
-  const urlObj = new URL(videoUrl);
-  if (!['http:', 'https:'].includes(urlObj.protocol)) {
-    throw new VideoDownloadError('Only HTTP(S) URLs are supported');
-  }
-
-  return new Promise((resolve, reject) => {
-    const getter = urlObj.protocol === 'https:' ? https.get : http.get;
-
-    const request = getter(urlObj, res => {
-      if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        if (redirectsLeft <= 0) {
-          res.resume();
-          reject(new VideoDownloadError('Too many redirects while downloading video'));
-          return;
-        }
-
-        const redirectUrl = new URL(res.headers.location, urlObj);
-        res.resume();
-        downloadVideoFromUrl(redirectUrl.toString(), destinationDir, maxBytes, redirectsLeft - 1)
-          .then(resolve)
-          .catch(reject);
-        return;
-      }
-
-      if ((res.statusCode ?? 500) >= 400) {
-        res.resume();
-        reject(new VideoDownloadError('Unable to download video from provided link'));
-        return;
-      }
-
-      const contentTypeHeader = res.headers['content-type'];
-      const contentType = Array.isArray(contentTypeHeader) ? contentTypeHeader[0] : contentTypeHeader;
-      const ext = inferRemoteExtension(urlObj, contentType);
-
-      if (!isAllowedRemoteVideo(contentType, ext)) {
-        res.resume();
-        reject(new VideoDownloadError('The provided link must point directly to a video file'));
-        return;
-      }
-
-      const lengthHeader = res.headers['content-length'];
-      const declaredLength = lengthHeader ? parseInt(Array.isArray(lengthHeader) ? lengthHeader[0] : lengthHeader, 10) : undefined;
-      if (declaredLength && declaredLength > maxBytes) {
-        res.resume();
-        reject(new VideoDownloadError(`File exceeds size limit of ${formatBytes(maxBytes)}`, 413));
-        return;
-      }
-
-      const filePath = path.join(destinationDir, `remote-${randomUUID()}${ext}`);
-      let settled = false;
-      let downloaded = 0;
-      const fileStream = fs.createWriteStream(filePath);
-
-      const fail = (err: Error) => {
-        if (settled) return;
-        settled = true;
-        if (fs.existsSync(filePath)) {
-          try {
-            fs.unlinkSync(filePath);
-          } catch {
-            /* ignore cleanup failure */
-          }
-        }
-        reject(err);
-      };
-
-      res.on('data', chunk => {
-        downloaded += chunk.length;
-        if (downloaded > maxBytes) {
-          fail(new VideoDownloadError(`File exceeds size limit of ${formatBytes(maxBytes)}`, 413));
-          res.destroy();
-          fileStream.destroy();
-        }
-      });
-
-      res.on('error', fail);
-      fileStream.on('error', fail);
-      fileStream.on('finish', () => {
-        if (!settled) {
-          settled = true;
-          resolve(filePath);
-        }
-      });
-
-      res.pipe(fileStream);
-    });
-
-    request.on('error', () => {
-      reject(new VideoDownloadError('Unable to download video from provided link', 502));
-    });
+async function queueVideoUrlImport(videoUrl: string): Promise<Record<string, unknown>> {
+  const response = await fetch(getVideoUrlImportFunctionUrl(), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ videoUrl }),
   });
+
+  let payload: Record<string, unknown> = {};
+  try {
+    payload = await response.json() as Record<string, unknown>;
+  } catch {
+    payload = {};
+  }
+
+  if (!response.ok) {
+    const errorMessage = typeof payload.error === 'string' ? payload.error : 'Failed to queue video import';
+    throw new VideoImportRequestError(errorMessage, response.status);
+  }
+
+  return payload;
 }
 
 function getBlobServiceClient(): BlobServiceClient {
@@ -406,6 +299,7 @@ async function getVideoRecord(recordId: string): Promise<VideoStatusRecord | und
 function mapStatusResponse(record: VideoStatusRecord) {
   return {
     recordId: record.recordId,
+    requestedVideoUrl: record.requestedVideoUrl,
     status: record.status,
     currentStage: record.currentStage,
     sourceContainer: record.sourceContainer,
@@ -429,6 +323,15 @@ function mapStatusResponse(record: VideoStatusRecord) {
     playerManifestBlobName: record.playerManifestBlobName,
     playerManifestBlobUrl: record.playerManifestBlobName ? createBlobUrl(record.sourceContainer, record.playerManifestBlobName) : record.playerManifestBlobUrl,
     detectedPlayerCount: record.detectedPlayerCount,
+    import: {
+      queuedAt: record.importQueuedAt,
+      startedAt: record.importStartedAt,
+      completedAt: record.importCompletedAt,
+      failedAt: record.importFailedAt,
+      durationMs: record.importDurationMs,
+      retryCount: record.importRetryCount ?? 0,
+      errorMessage: record.importErrorMessage,
+    },
     convert: {
       queuedAt: record.convertQueuedAt,
       startedAt: record.convertStartedAt,
@@ -615,19 +518,17 @@ router.post('/trim', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: t
       return;
     }
 
-    let localFilePath = req.file?.path;
-    let cleanupPath = req.file?.path;
-    let blobName = req.file?.filename;
-
     try {
       const videoUrlValue = typeof req.body?.videoUrl === 'string' ? req.body.videoUrl.trim() : '';
 
-      if (!localFilePath && videoUrlValue) {
-        localFilePath = await downloadVideoFromUrl(videoUrlValue, uploadsInputDir, MAX_VIDEO_BYTES);
-        cleanupPath = localFilePath;
-        blobName = path.basename(localFilePath);
+      if (!req.file && videoUrlValue) {
+        const importResult = await queueVideoUrlImport(videoUrlValue);
+        res.status(202).json(importResult);
+        return;
       }
 
+      const localFilePath = req.file?.path;
+      const blobName = req.file?.filename;
       if (!localFilePath || !blobName) {
         res.status(400).json({ error: 'No video file or video URL provided.' });
         return;
@@ -638,8 +539,8 @@ router.post('/trim', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: t
       const recordId = buildVideoRecordId(BLOB_CONTAINER, fullBlobName);
 
       // Clean up local temp file
-      if (cleanupPath) {
-        fs.unlink(cleanupPath, () => {});
+      if (localFilePath) {
+        fs.unlink(localFilePath, () => {});
       }
 
       res.json({
@@ -651,14 +552,15 @@ router.post('/trim', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: t
       });
     } catch (handlerError) {
       console.error('Upload error:', handlerError);
-      if (cleanupPath) fs.unlink(cleanupPath, () => {});
+      if (req.file?.path) fs.unlink(req.file.path, () => {});
 
-      if (handlerError instanceof VideoDownloadError) {
+      if (handlerError instanceof VideoImportRequestError) {
         res.status(handlerError.statusCode).json({ error: handlerError.message });
         return;
       }
 
-      res.status(500).json({ error: 'Failed to upload video' });
+      const errorMessage = handlerError instanceof Error ? handlerError.message : 'Failed to upload video';
+      res.status(500).json({ error: errorMessage });
     }
   });
 });

@@ -63,6 +63,13 @@
         "description": "Azure Queue Storage queue consumed for 720p conversion jobs."
       }
     },
+    "urlImportQueueName": {
+      "type": "string",
+      "defaultValue": "video-url-import-jobs",
+      "metadata": {
+        "description": "Azure Queue Storage queue consumed for URL import jobs before conversion."
+      }
+    },
     "trimQueueName": {
       "type": "string",
       "defaultValue": "video-trim-jobs",
@@ -178,6 +185,14 @@
       "type": "Microsoft.Storage/storageAccounts/queueServices/queues",
       "apiVersion": "2023-01-01",
       "name": "[format('{0}/default/{1}', variables('storageAccountName'), parameters('convertQueueName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts/queueServices', variables('storageAccountName'), 'default')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/queueServices/queues",
+      "apiVersion": "2023-01-01",
+      "name": "[format('{0}/default/{1}', variables('storageAccountName'), parameters('urlImportQueueName'))]",
       "dependsOn": [
         "[resourceId('Microsoft.Storage/storageAccounts/queueServices', variables('storageAccountName'), 'default')]"
       ]
@@ -319,6 +334,10 @@
             {
               "name": "VIDEO_UPLOAD_MAX_BYTES",
               "value": "[parameters('videoUploadMaxBytes')]"
+            },
+            {
+              "name": "VIDEO_URL_IMPORT_FUNCTION_URL",
+              "value": "[format('https://{0}.azurewebsites.net/api/videos/import-from-url', variables('functionAppName'))]"
             }
           ]
         }
@@ -445,12 +464,20 @@
               "value": "[parameters('convertQueueName')]"
             },
             {
+              "name": "VIDEO_URL_IMPORT_QUEUE_NAME",
+              "value": "[parameters('urlImportQueueName')]"
+            },
+            {
               "name": "VIDEO_TRIM_QUEUE_NAME",
               "value": "[parameters('trimQueueName')]"
             },
             {
               "name": "VIDEO_DETECT_QUEUE_NAME",
               "value": "[parameters('detectQueueName')]"
+            },
+            {
+              "name": "VIDEO_UPLOAD_MAX_BYTES",
+              "value": "[parameters('videoUploadMaxBytes')]"
             }
           ]
         }
@@ -662,6 +689,10 @@
     "convertQueueName": {
       "type": "string",
       "value": "[parameters('convertQueueName')]"
+    },
+    "urlImportQueueName": {
+      "type": "string",
+      "value": "[parameters('urlImportQueueName')]"
     },
     "trimQueueName": {
       "type": "string",

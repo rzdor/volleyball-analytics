@@ -23,6 +23,9 @@
     "convertQueueName": {
       "value": "video-convert-jobs"
     },
+    "urlImportQueueName": {
+      "value": "video-url-import-jobs"
+    },
     "trimQueueName": {
       "value": "video-trim-jobs"
     },

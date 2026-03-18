@@ -2,6 +2,8 @@ import { TableClient } from '@azure/data-tables';
 import {
   createUploadedVideoEntity,
   ProcessingJobType,
+  UrlImportDescriptor,
+  createUrlImportEntity,
   UploadedVideoDescriptor,
   VIDEO_RECORD_PARTITION_KEY,
   VideoRecordEntity,
@@ -48,6 +50,27 @@ export class VideoRecordStore {
   async createFromUpload(upload: UploadedVideoDescriptor): Promise<{ created: boolean; record: VideoRecordEntity }> {
     await this.tableReady;
     const entity = createUploadedVideoEntity(upload);
+
+    try {
+      await this.client.createEntity(entity);
+      return { created: true, record: entity };
+    } catch (error) {
+      if (getStatusCode(error) !== 409) {
+        throw error;
+      }
+
+      const record = await this.get(entity.recordId);
+      if (!record) {
+        throw error;
+      }
+
+      return { created: false, record };
+    }
+  }
+
+  async createForUrlImport(importRequest: UrlImportDescriptor): Promise<{ created: boolean; record: VideoRecordEntity }> {
+    await this.tableReady;
+    const entity = createUrlImportEntity(importRequest);
 
     try {
       await this.client.createEntity(entity);
@@ -188,6 +211,59 @@ export class VideoRecordStore {
 
     await this.update(recordId, updates);
     return startedAt;
+  }
+
+  async markImportProcessing(recordId: string): Promise<string> {
+    const startedAt = new Date().toISOString();
+    await this.update(recordId, {
+      status: 'processing',
+      currentStage: 'import',
+      processingStartedAt: startedAt,
+      importStartedAt: startedAt,
+      importErrorMessage: '',
+      importFailedAt: '',
+      errorMessage: '',
+      failedAt: '',
+    });
+    return startedAt;
+  }
+
+  async markImportCompletedAndQueueConvert(
+    recordId: string,
+    sourceBlobUrl: string,
+    importStartedAt: string,
+    convertJobToken: string
+  ): Promise<void> {
+    const now = new Date().toISOString();
+    await this.update(recordId, {
+      status: 'queued',
+      currentStage: 'convert',
+      sourceBlobUrl,
+      queuedAt: now,
+      importCompletedAt: now,
+      importDurationMs: toDurationMs(importStartedAt, now),
+      importErrorMessage: '',
+      importFailedAt: '',
+      convertQueuedAt: now,
+      convertJobToken: convertJobToken,
+      convertErrorMessage: '',
+      convertFailedAt: '',
+      lastJobType: 'convert',
+      errorMessage: '',
+      failedAt: '',
+    });
+  }
+
+  async markImportFailed(recordId: string, errorMessage: string): Promise<void> {
+    const failedAt = new Date().toISOString();
+    await this.update(recordId, {
+      status: 'failed',
+      currentStage: 'failed',
+      failedAt,
+      importFailedAt: failedAt,
+      importErrorMessage: errorMessage,
+      errorMessage,
+    });
   }
 
   async markConvertCompletedAndQueueTrim(

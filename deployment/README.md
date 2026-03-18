@@ -27,6 +27,7 @@ Creates all Azure resources needed to run the project.
 | Blob Container (`coordination`) | — | Reserved for coordination/auxiliary assets |
 | Blob Container (`detections`) | — | Player detection results (JSON) |
 | Azure Table (`videoprocessingrecords`) | — | Tracks one record per uploaded video and processing state |
+| Azure Queue (`video-url-import-jobs`) | — | Buffers remote URL copy jobs before the video enters the main pipeline |
 | Azure Queue (`video-convert-jobs`) | — | Buffers 720p conversion jobs for the worker |
 | Azure Queue (`video-trim-jobs`) | — | Buffers trim/split jobs after conversion succeeds |
 | Azure Queue (`video-detect-jobs`) | — | Buffers detect jobs after trim succeeds |
@@ -50,7 +51,7 @@ code is running** — EventGrid validates the function endpoint exists.
 
 Queue messages are also handled as single-attempt work items by the worker: on any processing exception the record is marked `failed` and the message is deleted, and if Azure Queue Storage redelivers a message later it is marked failed instead of being retried.
 
-After ingestion, the worker first normalizes the source video to 720p and stores that converted asset under `processed/{recordId}/`. The trim stage then uses the converted blob, writes the consolidated trimmed video plus each individual scene clip under the same `processed/{recordId}/` folder, and the detect stage consumes the full trimmed video from that folder.
+For URL submissions, the web app now calls a Function App endpoint that creates the record, queues an `import` stage, and copies the remote file into Blob Storage asynchronously. After that import completes, the worker normalizes the source video to 720p and stores that converted asset under `processed/{recordId}/`. The trim stage then uses the converted blob, writes the consolidated trimmed video plus each individual scene clip under the same `processed/{recordId}/` folder, and the detect stage consumes the full trimmed video from that folder.
 
 `BlobRenamed` is emitted only by storage features that support rename events (for example ADLS Gen2 hierarchical namespace or SFTP rename). When those events are available, the function now uses the rename destination URL and only processes files whose final path is under `input/`.
 
@@ -139,6 +140,7 @@ az deployment group create \
 | `coordinationBlobContainerName` | `coordination` | Blob container for logs/metadata |
 | `detectionsBlobContainerName` | `detections` | Blob container for detection results |
 | `videoRecordsTableName` | `videoprocessingrecords` | Azure Table used for per-video processing state |
+| `urlImportQueueName` | `video-url-import-jobs` | Queue consumed by the Function App for async URL imports |
 | `convertQueueName` | `video-convert-jobs` | Queue consumed by the worker for 720p conversion jobs |
 | `trimQueueName` | `video-trim-jobs` | Queue consumed by the worker for trim/split jobs |
 | `detectQueueName` | `video-detect-jobs` | Queue consumed by the worker for detect jobs |

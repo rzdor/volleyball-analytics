@@ -317,20 +317,32 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function renderPendingStatus(result) {
-    statusSummary.textContent = 'Upload complete. Waiting for the processing pipeline to pick up this video.';
+    const isUrlImport = Boolean(result.requestedVideoUrl) || result.currentStage === 'import';
+    statusSummary.textContent = isUrlImport
+      ? 'Video URL accepted. Import to Blob Storage has been queued.'
+      : 'Upload complete. Waiting for the processing pipeline to pick up this video.';
     updateDetailsLink(result.recordId || null);
     renderStatusFacts([
       ['Record ID', result.recordId || 'Pending'],
-      ['Blob', result.blobName || 'Pending'],
+      [isUrlImport ? 'Target blob' : 'Blob', result.blobName || 'Pending'],
       ['Container', result.container || 'Pending']
     ]);
-    renderStatusStages([
-      { label: 'Upload accepted', state: 'done', detail: 'Stored in Blob Storage.' },
-      { label: 'Convert to 720p', state: 'active', detail: 'Waiting for ingestion/status record.' },
+    const stages = [
+      { label: 'Upload accepted', state: 'done', detail: isUrlImport ? 'URL submission accepted.' : 'Stored in Blob Storage.' },
+    ];
+
+    if (isUrlImport) {
+      stages.push({ label: 'Import from URL', state: 'active', detail: 'Waiting for the Function App to copy the file into Blob Storage.' });
+    }
+
+    stages.push(
+      { label: 'Convert to 720p', state: isUrlImport ? 'todo' : 'active', detail: isUrlImport ? 'Will start after import completes.' : 'Waiting for ingestion/status record.' },
       { label: 'Trim and split scenes', state: 'todo', detail: 'Will start after conversion completes.' },
       { label: 'Detect players', state: 'todo', detail: 'Will start after trim completes.' },
       { label: 'Completed', state: 'todo', detail: 'Outputs will appear here.' }
-    ]);
+    );
+
+    renderStatusStages(stages);
     statusError.textContent = '';
     statusError.classList.add('hidden');
     updateResultLinks({});
@@ -425,18 +437,33 @@ document.addEventListener('DOMContentLoaded', () => {
       facts.push(['Output folder', status.processedOutputFolder]);
     }
 
+    if (status.requestedVideoUrl) {
+      facts.push(['Requested URL', status.requestedVideoUrl]);
+    }
+
     if (typeof status.processedSceneCount === 'number') {
       facts.push(['Scene files', String(status.processedSceneCount)]);
     }
 
     renderStatusFacts(facts);
 
-    renderStatusStages([
+    const stages = [
       {
         label: 'Upload accepted',
         state: 'done',
         detail: formatDateTime(status.uploadedAt)
       },
+    ];
+
+    if (status.requestedVideoUrl) {
+      stages.push({
+        label: 'Import from URL',
+        state: getStageState(status, 'import'),
+        detail: describeStage(status.import)
+      });
+    }
+
+    stages.push(
       {
         label: 'Convert to 720p',
         state: getStageState(status, 'convert'),
@@ -457,7 +484,9 @@ document.addEventListener('DOMContentLoaded', () => {
         state: status.status === 'completed' ? 'done' : status.status === 'failed' ? 'blocked' : 'todo',
         detail: status.completedAt ? formatDateTime(status.completedAt) : 'Waiting for final outputs.'
       }
-    ]);
+    );
+
+    renderStatusStages(stages);
 
     if (status.errorMessage) {
       statusError.textContent = status.errorMessage;
@@ -536,6 +565,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (stage && stage.completedAt) return 'done';
     if (status.currentStage === stageName && status.status === 'processing') return 'active';
     if (status.currentStage === stageName && status.status === 'queued') return 'active';
+    if (stageName === 'convert' && status.import && status.import.completedAt) return 'active';
     if (stageName === 'trim' && status.convert && status.convert.completedAt) return 'active';
     if (stageName === 'detect' && status.trim && status.trim.completedAt) return 'active';
     return 'todo';

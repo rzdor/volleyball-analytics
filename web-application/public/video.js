@@ -64,14 +64,22 @@ document.addEventListener('DOMContentLoaded', () => {
     renderFacts(detailFacts, [
       ['Record ID', details.recordId],
       ['Source blob', details.sourceBlobName],
+      ['Requested URL', details.requestedVideoUrl || '—'],
       ['Uploaded', formatDateTime(details.uploadedAt)],
       ['Updated', formatDateTime(details.updatedAt)],
       ['Output folder', details.processedOutputFolder || '—'],
       ['Scene files', typeof details.processedSceneCount === 'number' ? String(details.processedSceneCount) : '—'],
     ]);
 
-    renderStages([
+    const stages = [
       { label: 'Upload accepted', state: 'done', detail: formatDateTime(details.uploadedAt) },
+    ];
+
+    if (details.requestedVideoUrl) {
+      stages.push({ label: 'Import from URL', state: getStageState(details, 'import'), detail: describeStage(details.import) });
+    }
+
+    stages.push(
       { label: 'Convert to 720p', state: getStageState(details, 'convert'), detail: describeStage(details.convert) },
       { label: 'Trim and split scenes', state: getStageState(details, 'trim'), detail: describeStage(details.trim) },
       { label: 'Detect players', state: getStageState(details, 'detect'), detail: describeStage(details.detect) },
@@ -80,7 +88,9 @@ document.addEventListener('DOMContentLoaded', () => {
         state: details.status === 'completed' ? 'done' : details.status === 'failed' ? 'blocked' : 'todo',
         detail: details.completedAt ? formatDateTime(details.completedAt) : 'Waiting for final outputs.',
       },
-    ]);
+    );
+
+    renderStages(stages);
 
     renderAssets(details);
     renderScenes(details.splitParts || []);
@@ -229,6 +239,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (stage && stage.completedAt) return 'done';
     if (status.currentStage === stageName && status.status === 'processing') return 'active';
     if (status.currentStage === stageName && status.status === 'queued') return 'active';
+    if (stageName === 'convert' && status.import && status.import.completedAt) return 'active';
     if (stageName === 'trim' && status.convert && status.convert.completedAt) return 'active';
     if (stageName === 'detect' && status.trim && status.trim.completedAt) return 'active';
     return 'todo';
