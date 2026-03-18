@@ -5,6 +5,7 @@ import { randomUUID } from 'crypto';
 import { DequeuedMessageItem } from '@azure/storage-queue';
 import { detectPlayers } from './services/playerDetector';
 import { downloadBlobToFile } from './services/blobUtils';
+import { buildPlayerManifest } from './services/playerProfiles';
 import { getProcessingQueue, ProcessingQueueName } from './services/processingQueue';
 import { createVideoStorage } from './services/storageProvider';
 import { NoSegmentsDetectedError, runTrimPipeline } from './services/trimPipeline';
@@ -207,17 +208,30 @@ async function runDetectJob(job: ProcessingJobMessage, retryCount: number): Prom
     fs.writeFileSync(detectionJsonPath, JSON.stringify(result, null, 2));
 
     const storedDetection = await storage.saveDetection(detectionJsonPath, detectionFilename);
+    const playerManifestResult = await buildPlayerManifest({
+      recordId: job.recordId,
+      videoPath: tempInputPath,
+      sourceVideoBlobName: job.sourceBlobName,
+      processedBlobName: job.processedBlobName!,
+      detectionResult: result,
+      storage,
+    });
 
     await recordStore.markDetectCompleted(
       job.recordId,
       `detections/${storedDetection.name}`,
       storedDetection.url,
-      detectStartedAt
+      detectStartedAt,
+      playerManifestResult.manifestBlobName,
+      playerManifestResult.manifestUrl,
+      playerManifestResult.manifest.players.length
     );
 
     console.log('[worker] Detect job completed', {
       recordId: job.recordId,
       detectionBlobName: `detections/${storedDetection.name}`,
+      playerManifestBlobName: playerManifestResult.manifestBlobName,
+      detectedPlayerCount: playerManifestResult.manifest.players.length,
     });
 
     if (fs.existsSync(detectionJsonPath)) {

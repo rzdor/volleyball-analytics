@@ -254,7 +254,10 @@ export class VideoRecordStore {
     recordId: string,
     detectionBlobName: string,
     detectionBlobUrl: string,
-    detectStartedAt: string
+    detectStartedAt: string,
+    playerManifestBlobName?: string,
+    playerManifestBlobUrl?: string,
+    detectedPlayerCount?: number
   ): Promise<void> {
     const now = new Date().toISOString();
     await this.update(recordId, {
@@ -264,6 +267,9 @@ export class VideoRecordStore {
       completedAt: now,
       detectionBlobName,
       detectionBlobUrl,
+      playerManifestBlobName,
+      playerManifestBlobUrl,
+      detectedPlayerCount,
       detectCompletedAt: now,
       detectDurationMs: toDurationMs(detectStartedAt, now),
       detectErrorMessage: '',

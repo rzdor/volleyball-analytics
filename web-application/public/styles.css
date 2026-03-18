@@ -632,6 +632,70 @@ footer {
   color: #a0a0a0;
 }
 
+.page-header-actions {
+  margin-top: 1rem;
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.page-header-actions .btn-primary,
+.page-header-actions .btn-secondary {
+  width: auto;
+  margin-top: 0;
+  padding: 0.75rem 1.5rem;
+}
+
+.player-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.player-card {
+  border-radius: 14px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.player-card-image {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  display: block;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.player-card-image-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #a0a0a0;
+}
+
+.player-card-body {
+  padding: 1rem;
+}
+
+.player-card-body h3 {
+  margin-bottom: 0.4rem;
+  color: #fff;
+}
+
+.player-card-meta {
+  margin-bottom: 1rem;
+  color: #bdbdbd;
+  font-size: 0.9rem;
+}
+
+.player-save-success {
+  border-color: rgba(46, 204, 113, 0.45);
+  background: rgba(46, 204, 113, 0.12);
+  color: #8ff0b2;
+}
+
 @media (max-width: 600px) {
   .container {
     padding: 1rem;
@@ -656,5 +720,9 @@ footer {
   .asset-item {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .player-grid {
+    grid-template-columns: 1fr;
   }
 }

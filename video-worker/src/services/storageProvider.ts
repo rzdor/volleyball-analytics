@@ -54,6 +54,11 @@ function guessContentType(filename: string): string {
       return 'video/x-msvideo';
     case '.json':
       return 'application/json';
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg';
+    case '.png':
+      return 'image/png';
     default:
       return 'video/mp4';
   }

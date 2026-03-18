@@ -7,6 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const detailSummary = document.getElementById('detailSummary');
   const detailFacts = document.getElementById('detailFacts');
   const detailStages = document.getElementById('detailStages');
+  const managePlayersLink = document.getElementById('managePlayersLink');
   const assetLinks = document.getElementById('assetLinks');
   const sceneList = document.getElementById('sceneList');
   const detectionFacts = document.getElementById('detectionFacts');
@@ -42,6 +43,10 @@ document.addEventListener('DOMContentLoaded', () => {
     detailContent.classList.remove('hidden');
 
     pageSubtitle.textContent = `${details.sourceBlobName || 'Video'} • Record ${details.recordId}`;
+    if (managePlayersLink && details.playersPageUrl) {
+      managePlayersLink.href = details.playersPageUrl;
+      managePlayersLink.classList.remove('hidden');
+    }
 
     const summary = [
       `Status: ${formatStatus(details.status)}`,
@@ -114,6 +119,11 @@ document.addEventListener('DOMContentLoaded', () => {
       { label: 'Converted 720p video', asset: details.convertedVideo },
       { label: 'Trimmed full video', asset: details.trimmedVideo },
       { label: 'Detection JSON', asset: details.detectionFile },
+      { label: 'Player manifest', asset: details.playerManifestBlobName ? {
+        name: details.playerManifestBlobName.split('/').pop(),
+        url: details.playerManifestBlobUrl,
+        downloadUrl: details.playerManifestBlobUrl,
+      } : null },
     ].filter(item => item.asset);
 
     if (assets.length === 0) {

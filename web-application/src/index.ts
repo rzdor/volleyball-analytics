@@ -31,6 +31,10 @@ app.get('/videos/:recordId', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/video.html'));
 });
 
+app.get('/videos/:recordId/players', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/players.html'));
+});
+
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });

@@ -65,6 +65,9 @@ type VideoStatusRecord = {
   processedSceneCount?: number;
   detectionBlobName?: string;
   detectionBlobUrl?: string;
+  playerManifestBlobName?: string;
+  playerManifestBlobUrl?: string;
+  detectedPlayerCount?: number;
   errorMessage?: string;
 };
 
@@ -82,6 +85,24 @@ type DetectionSummary = {
   peakPlayersInFrame: number;
   sampledFrames: number;
   teamCount: number;
+};
+
+type PlayerManifestRecord = {
+  recordId: string;
+  generatedAt: string;
+  sourceVideoBlobName: string;
+  processedBlobName: string;
+  players: Array<{
+    trackId: number;
+    teamId: number;
+    frameCount: number;
+    avgConfidence: number;
+    bestConfidence?: number;
+    sampleTimestamp?: number;
+    imageBlobName?: string;
+    displayName?: string;
+    notes?: string;
+  }>;
 };
 
 function getMaxVideoBytes(): number {
@@ -200,6 +221,23 @@ async function readStreamAsString(stream: NodeJS.ReadableStream | undefined): Pr
   return Buffer.concat(chunks).toString('utf8');
 }
 
+async function readJsonBlob<T>(containerName: string, blobName: string): Promise<T> {
+  const blobClient = getBlobContainerClient(containerName).getBlobClient(blobName);
+  const response = await blobClient.download();
+  const raw = await readStreamAsString(response.readableStreamBody);
+  return JSON.parse(raw) as T;
+}
+
+async function writeJsonBlob(containerName: string, blobName: string, payload: unknown): Promise<void> {
+  const blobClient = getBlobContainerClient(containerName).getBlockBlobClient(blobName);
+  const content = JSON.stringify(payload, null, 2);
+  await blobClient.upload(content, Buffer.byteLength(content), {
+    blobHTTPHeaders: {
+      blobContentType: 'application/json',
+    },
+  });
+}
+
 async function getVideoRecord(recordId: string): Promise<VideoStatusRecord | undefined> {
   const tableClient = getTableClient();
 
@@ -229,13 +267,16 @@ function mapStatusResponse(record: VideoStatusRecord) {
     failedAt: record.failedAt,
     errorMessage: record.errorMessage,
     convertedBlobName: record.convertedBlobName,
-    convertedBlobUrl: record.convertedBlobUrl,
+    convertedBlobUrl: record.convertedBlobName ? createBlobUrl(record.sourceContainer, record.convertedBlobName) : record.convertedBlobUrl,
     processedBlobName: record.processedBlobName,
-    processedBlobUrl: record.processedBlobUrl,
+    processedBlobUrl: record.processedBlobName ? createBlobUrl(record.sourceContainer, record.processedBlobName) : record.processedBlobUrl,
     processedOutputFolder: record.processedOutputFolder,
     processedSceneCount: record.processedSceneCount,
     detectionBlobName: record.detectionBlobName,
-    detectionBlobUrl: record.detectionBlobUrl,
+    detectionBlobUrl: record.detectionBlobName ? createBlobUrl(record.sourceContainer, record.detectionBlobName) : record.detectionBlobUrl,
+    playerManifestBlobName: record.playerManifestBlobName,
+    playerManifestBlobUrl: record.playerManifestBlobName ? createBlobUrl(record.sourceContainer, record.playerManifestBlobName) : record.playerManifestBlobUrl,
+    detectedPlayerCount: record.detectedPlayerCount,
     convert: {
       queuedAt: record.convertQueuedAt,
       startedAt: record.convertStartedAt,
@@ -288,19 +329,12 @@ async function loadDetectionSummary(record: VideoStatusRecord): Promise<Detectio
     return undefined;
   }
 
-  const blobClient = getBlobContainerClient(record.sourceContainer).getBlobClient(record.detectionBlobName);
-  const response = await blobClient.download();
-  const raw = await readStreamAsString(response.readableStreamBody);
-  if (!raw) {
-    return undefined;
-  }
-
-  const detection = JSON.parse(raw) as {
+  const detection = await readJsonBlob<{
     sampledFrames?: number;
     teams?: Array<{ id?: number }>;
     tracks?: Array<{ trackId?: number }>;
     frames?: Array<{ players?: Array<{ trackId?: number }> }>;
-  };
+  }>(record.sourceContainer, record.detectionBlobName);
 
   const trackIds = new Set<number>();
   if (Array.isArray(detection.tracks)) {
@@ -331,6 +365,39 @@ async function loadDetectionSummary(record: VideoStatusRecord): Promise<Detectio
       ? detection.sampledFrames
       : Array.isArray(detection.frames) ? detection.frames.length : 0,
     teamCount: Array.isArray(detection.teams) ? detection.teams.length : 0,
+  };
+}
+
+async function loadPlayerManifest(record: VideoStatusRecord): Promise<PlayerManifestRecord | undefined> {
+  if (!record.playerManifestBlobName) {
+    return undefined;
+  }
+
+  try {
+    return await readJsonBlob<PlayerManifestRecord>(record.sourceContainer, record.playerManifestBlobName);
+  } catch (error) {
+    if (typeof error === 'object' && error !== null && 'statusCode' in error && Number((error as { statusCode?: number }).statusCode) === 404) {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+function buildPlayerManifestResponse(record: VideoStatusRecord, manifest: PlayerManifestRecord | undefined) {
+  if (!manifest) {
+    return {
+      generatedAt: undefined,
+      players: [],
+    };
+  }
+
+  return {
+    generatedAt: manifest.generatedAt,
+    players: manifest.players.map(player => ({
+      ...player,
+      imageUrl: player.imageBlobName ? createBlobUrl(record.sourceContainer, player.imageBlobName) : undefined,
+      imageDownloadUrl: player.imageBlobName ? createBlobUrl(record.sourceContainer, player.imageBlobName, true) : undefined,
+    })),
   };
 }
 
@@ -484,6 +551,7 @@ router.get('/:recordId/details', rateLimit({ windowMs: 60_000, limit: 120, stand
       asset.blobName !== record.convertedBlobName && asset.blobName !== record.processedBlobName
     );
     const detectionSummary = await loadDetectionSummary(record);
+    const playerManifest = await loadPlayerManifest(record);
 
     res.json({
       ...mapStatusResponse(record),
@@ -493,10 +561,111 @@ router.get('/:recordId/details', rateLimit({ windowMs: 60_000, limit: 120, stand
       splitParts,
       detectionFile,
       detectionSummary,
+      playersPageUrl: `/videos/${encodeURIComponent(record.recordId)}/players`,
+      playerManifest: buildPlayerManifestResponse(record, playerManifest),
     });
   } catch (error) {
     console.error('Video details error:', error);
     res.status(500).json({ error: 'Failed to load video details' });
+  }
+});
+
+router.get('/:recordId/players', rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: true, legacyHeaders: false }), async (req: Request, res: Response): Promise<void> => {
+  try {
+    const recordIdParam = req.params.recordId;
+    const recordId = typeof recordIdParam === 'string' ? recordIdParam.trim() : '';
+    if (!recordId) {
+      res.status(400).json({ error: 'recordId is required' });
+      return;
+    }
+
+    const record = await getVideoRecord(recordId);
+    if (!record) {
+      res.status(404).json({ error: 'Video players not found', recordId });
+      return;
+    }
+
+    const manifest = await loadPlayerManifest(record);
+    res.json({
+      ...mapStatusResponse(record),
+      playersPageUrl: `/videos/${encodeURIComponent(record.recordId)}/players`,
+      videoDetailsUrl: `/videos/${encodeURIComponent(record.recordId)}`,
+      playerManifest: buildPlayerManifestResponse(record, manifest),
+    });
+  } catch (error) {
+    console.error('Player manifest error:', error);
+    res.status(500).json({ error: 'Failed to load player list' });
+  }
+});
+
+router.put('/:recordId/players', rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: true, legacyHeaders: false }), async (req: Request, res: Response): Promise<void> => {
+  try {
+    const recordIdParam = req.params.recordId;
+    const recordId = typeof recordIdParam === 'string' ? recordIdParam.trim() : '';
+    if (!recordId) {
+      res.status(400).json({ error: 'recordId is required' });
+      return;
+    }
+
+    const record = await getVideoRecord(recordId);
+    if (!record) {
+      res.status(404).json({ error: 'Video players not found', recordId });
+      return;
+    }
+
+    if (!record.playerManifestBlobName) {
+      res.status(409).json({ error: 'Player manifest is not available for this video yet.' });
+      return;
+    }
+
+    const currentManifest = await loadPlayerManifest(record);
+    if (!currentManifest) {
+      res.status(409).json({ error: 'Player manifest is not available for this video yet.' });
+      return;
+    }
+
+    const requestedPlayers = Array.isArray(req.body?.players) ? req.body.players : undefined;
+    if (!requestedPlayers) {
+      res.status(400).json({ error: 'players array is required' });
+      return;
+    }
+
+    const requestedByTrackId = new Map<number, { displayName?: string; notes?: string }>();
+    for (const player of requestedPlayers) {
+      if (typeof player?.trackId !== 'number') {
+        continue;
+      }
+
+      requestedByTrackId.set(player.trackId, {
+        displayName: typeof player.displayName === 'string' ? player.displayName.trim() : '',
+        notes: typeof player.notes === 'string' ? player.notes.trim() : '',
+      });
+    }
+
+    const updatedManifest: PlayerManifestRecord = {
+      ...currentManifest,
+      generatedAt: currentManifest.generatedAt,
+      players: currentManifest.players.map(player => {
+        const requested = requestedByTrackId.get(player.trackId);
+        return requested
+          ? {
+              ...player,
+              displayName: requested.displayName ?? '',
+              notes: requested.notes ?? '',
+            }
+          : player;
+      }),
+    };
+
+    await writeJsonBlob(record.sourceContainer, record.playerManifestBlobName, updatedManifest);
+
+    res.json({
+      success: true,
+      playerManifest: buildPlayerManifestResponse(record, updatedManifest),
+    });
+  } catch (error) {
+    console.error('Player manifest update error:', error);
+    res.status(500).json({ error: 'Failed to update player list' });
   }
 });
 

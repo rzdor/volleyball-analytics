@@ -74,6 +74,9 @@ export interface VideoRecordEntity {
   processedSceneCount?: number;
   detectionBlobName?: string;
   detectionBlobUrl?: string;
+  playerManifestBlobName?: string;
+  playerManifestBlobUrl?: string;
+  detectedPlayerCount?: number;
   errorMessage?: string;
 }
 
