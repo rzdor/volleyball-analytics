@@ -1,7 +1,5 @@
 import { Router, Request, Response } from 'express';
-import multer from 'multer';
 import path from 'path';
-import fs from 'fs';
 import { createHash, randomUUID } from 'crypto';
 import rateLimit from 'express-rate-limit';
 import { TableClient } from '@azure/data-tables';
@@ -14,12 +12,12 @@ import {
 
 const router = Router();
 
-const uploadsInputDir = path.resolve(process.cwd(), 'uploads/inputs');
 const DEFAULT_MAX_VIDEO_BYTES = 5 * 1024 * 1024 * 1024; // 5GB
 const BLOB_CONTAINER = process.env.VIDEO_BLOB_CONTAINER || 'volleyball-videos';
 const BLOB_FOLDER = 'input';
 const VIDEO_RECORDS_TABLE_NAME = process.env.VIDEO_RECORDS_TABLE_NAME || 'videoprocessingrecords';
 const MAX_VIDEO_BYTES = getMaxVideoBytes();
+const UPLOAD_SAS_TTL_MS = 60 * 60 * 1000;
 
 type VideoStatusRecord = {
   partitionKey: string;
@@ -243,6 +241,37 @@ function createBlobUrl(containerName: string, blobName: string, asAttachment = f
   return `${blobClient.url}?${sas}`;
 }
 
+function createBlobUploadTarget(containerName: string, blobName: string): {
+  uploadUrl: string;
+  blobUrl: string;
+  expiresAt: string;
+} {
+  const connectionString = getStorageConnectionString();
+  const containerClient = getBlobContainerClient(containerName);
+  const blobClient = containerClient.getBlockBlobClient(blobName);
+  const sharedKey = parseSharedKey(connectionString);
+
+  if (!sharedKey) {
+    throw new Error('Storage shared key is required to create upload SAS URLs');
+  }
+
+  const startsOn = new Date();
+  const expiresOn = new Date(startsOn.getTime() + UPLOAD_SAS_TTL_MS);
+  const sas = generateBlobSASQueryParameters({
+    containerName,
+    blobName,
+    permissions: BlobSASPermissions.parse('cw'),
+    startsOn,
+    expiresOn,
+  }, sharedKey).toString();
+
+  return {
+    uploadUrl: `${blobClient.url}?${sas}`,
+    blobUrl: blobClient.url,
+    expiresAt: expiresOn.toISOString(),
+  };
+}
+
 function buildBlobAsset(containerName: string, blobName: string, size?: number, lastModified?: Date): BlobAsset {
   return {
     name: path.basename(blobName),
@@ -462,15 +491,6 @@ function buildVideoRecordId(containerName: string, blobName: string): string {
     .digest('hex');
 }
 
-async function uploadToBlob(filePath: string, blobName: string): Promise<string> {
-  const blobService = getBlobServiceClient();
-  const containerClient = blobService.getContainerClient(BLOB_CONTAINER);
-  await containerClient.createIfNotExists();
-  const blockBlobClient = containerClient.getBlockBlobClient(`${BLOB_FOLDER}/${blobName}`);
-  await blockBlobClient.uploadFile(filePath);
-  return blockBlobClient.url;
-}
-
 const ALLOWED_VIDEO_MIME_TYPES = [
   'video/mp4',
   'video/quicktime',
@@ -478,91 +498,122 @@ const ALLOWED_VIDEO_MIME_TYPES = [
   'video/webm',
 ] as const;
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadsInputDir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = randomUUID();
-    cb(null, uniqueSuffix + path.extname(file.originalname));
+const ALLOWED_VIDEO_EXTENSIONS = ['.mp4', '.webm', '.mov', '.avi'] as const;
+
+function inferVideoExtension(filename: string, contentType?: string): string {
+  const ext = path.extname(filename).toLowerCase();
+  if (ALLOWED_VIDEO_EXTENSIONS.includes(ext as typeof ALLOWED_VIDEO_EXTENSIONS[number])) {
+    return ext;
   }
-});
 
-const fileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
-  if (ALLOWED_VIDEO_MIME_TYPES.includes(file.mimetype as typeof ALLOWED_VIDEO_MIME_TYPES[number])) {
-    cb(null, true);
-  } else {
-    cb(new Error('Invalid file type. Only video files are allowed.'));
+  if (contentType) {
+    const normalized = contentType.split(';')[0].trim().toLowerCase();
+    if (normalized.includes('webm')) return '.webm';
+    if (normalized.includes('quicktime')) return '.mov';
+    if (normalized.includes('x-msvideo')) return '.avi';
   }
-};
 
-const upload = multer({
-  storage,
-  fileFilter,
-  limits: { fileSize: MAX_VIDEO_BYTES }
-});
+  return '.mp4';
+}
 
-const uploadSingleVideo = upload.single('video');
+function isAllowedVideoUpload(contentType: string | undefined, filename: string): boolean {
+  const ext = inferVideoExtension(filename, contentType);
+  const normalizedType = contentType ? contentType.split(';')[0].trim().toLowerCase() : '';
 
-// TODO: Update to call the Function App video-processing endpoint
-router.post('/trim', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: true, legacyHeaders: false }), (req: Request, res: Response): void => {
-  uploadSingleVideo(req, res, async (error?: unknown) => {
-    if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
+  if (normalizedType) {
+    if (normalizedType.startsWith('video/')) {
+      return true;
+    }
+
+    if (ALLOWED_VIDEO_MIME_TYPES.includes(normalizedType as typeof ALLOWED_VIDEO_MIME_TYPES[number])) {
+      return true;
+    }
+
+    if (normalizedType === 'application/octet-stream') {
+      return ALLOWED_VIDEO_EXTENSIONS.includes(ext as typeof ALLOWED_VIDEO_EXTENSIONS[number]);
+    }
+
+    return false;
+  }
+
+  return ALLOWED_VIDEO_EXTENSIONS.includes(ext as typeof ALLOWED_VIDEO_EXTENSIONS[number]);
+}
+
+router.post('/upload-target', rateLimit({ windowMs: 60_000, limit: 20, standardHeaders: true, legacyHeaders: false }), async (req: Request, res: Response): Promise<void> => {
+  try {
+    const rawFilename = typeof req.body?.filename === 'string' ? req.body.filename.trim() : '';
+    const contentType = typeof req.body?.contentType === 'string' ? req.body.contentType.trim() : '';
+    const size = typeof req.body?.size === 'number'
+      ? req.body.size
+      : Number.parseInt(String(req.body?.size ?? ''), 10);
+
+    if (!rawFilename) {
+      res.status(400).json({ error: 'filename is required' });
+      return;
+    }
+
+    if (!Number.isFinite(size) || size <= 0) {
+      res.status(400).json({ error: 'size must be a positive number' });
+      return;
+    }
+
+    if (size > MAX_VIDEO_BYTES) {
       res.status(413).json({ error: `File exceeds the upload limit of ${formatBytes(MAX_VIDEO_BYTES)}.` });
       return;
     }
 
-    if (error) {
-      console.error('Upload middleware error:', error);
-      res.status(400).json({ error: 'Failed to read the uploaded file.' });
+    if (!isAllowedVideoUpload(contentType || undefined, rawFilename)) {
+      res.status(400).json({ error: 'Invalid file type. Only video files are allowed.' });
       return;
     }
 
-    try {
-      const videoUrlValue = typeof req.body?.videoUrl === 'string' ? req.body.videoUrl.trim() : '';
+    const extension = inferVideoExtension(rawFilename, contentType || undefined);
+    const blobName = `${BLOB_FOLDER}/${randomUUID()}${extension}`;
+    const containerClient = getBlobContainerClient(BLOB_CONTAINER);
+    await containerClient.createIfNotExists();
 
-      if (!req.file && videoUrlValue) {
-        const importResult = await queueVideoUrlImport(videoUrlValue);
-        res.status(202).json(importResult);
-        return;
-      }
+    const { uploadUrl, blobUrl, expiresAt } = createBlobUploadTarget(BLOB_CONTAINER, blobName);
+    const recordId = buildVideoRecordId(BLOB_CONTAINER, blobName);
 
-      const localFilePath = req.file?.path;
-      const blobName = req.file?.filename;
-      if (!localFilePath || !blobName) {
-        res.status(400).json({ error: 'No video file or video URL provided.' });
-        return;
-      }
+    res.status(202).json({
+      success: true,
+      recordId,
+      uploadUrl,
+      blobUrl,
+      blobName,
+      container: BLOB_CONTAINER,
+      expiresAt,
+      currentStage: 'ingest',
+      status: 'uploaded',
+    });
+  } catch (error) {
+    console.error('Create upload target error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Failed to create upload target';
+    res.status(500).json({ error: errorMessage });
+  }
+});
 
-      const blobUrl = await uploadToBlob(localFilePath, blobName);
-      const fullBlobName = `${BLOB_FOLDER}/${blobName}`;
-      const recordId = buildVideoRecordId(BLOB_CONTAINER, fullBlobName);
-
-      // Clean up local temp file
-      if (localFilePath) {
-        fs.unlink(localFilePath, () => {});
-      }
-
-      res.json({
-        success: true,
-        recordId,
-        blobUrl,
-        blobName: fullBlobName,
-        container: BLOB_CONTAINER,
-      });
-    } catch (handlerError) {
-      console.error('Upload error:', handlerError);
-      if (req.file?.path) fs.unlink(req.file.path, () => {});
-
-      if (handlerError instanceof VideoImportRequestError) {
-        res.status(handlerError.statusCode).json({ error: handlerError.message });
-        return;
-      }
-
-      const errorMessage = handlerError instanceof Error ? handlerError.message : 'Failed to upload video';
-      res.status(500).json({ error: errorMessage });
+router.post('/trim', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: true, legacyHeaders: false }), async (req: Request, res: Response): Promise<void> => {
+  try {
+    const videoUrlValue = typeof req.body?.videoUrl === 'string' ? req.body.videoUrl.trim() : '';
+    if (!videoUrlValue) {
+      res.status(400).json({ error: 'No video URL provided.' });
+      return;
     }
-  });
+
+    const importResult = await queueVideoUrlImport(videoUrlValue);
+    res.status(202).json(importResult);
+  } catch (handlerError) {
+    console.error('Video URL import error:', handlerError);
+
+    if (handlerError instanceof VideoImportRequestError) {
+      res.status(handlerError.statusCode).json({ error: handlerError.message });
+      return;
+    }
+
+    const errorMessage = handlerError instanceof Error ? handlerError.message : 'Failed to queue video import';
+    res.status(500).json({ error: errorMessage });
+  }
 });
 
 router.get('/config', (_req: Request, res: Response): void => {

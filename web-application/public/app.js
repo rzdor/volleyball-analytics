@@ -165,27 +165,45 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    const formData = new FormData();
     if (file) {
-      formData.append('video', file);
-    }
-    if (videoUrl) {
-      formData.append('videoUrl', videoUrl);
+      await processFileUpload(file);
+      return;
     }
 
-    await processVideo('/api/videos/trim', formData, { trackUpload: Boolean(file) });
+    await processVideoRequest('/api/videos/trim', { videoUrl });
   });
 
   refreshLibraryBtn?.addEventListener('click', () => {
     fetchExistingVideos();
   });
 
-  async function processVideo(url, data, options = {}) {
+  async function processFileUpload(file) {
+    showLoading(true, { trackUpload: true });
+    results.classList.add('hidden');
+
+    try {
+      if (loadingMessage) {
+        loadingMessage.textContent = 'Preparing secure upload...';
+      }
+
+      const uploadTarget = await requestUploadTarget(file);
+      await uploadFileToBlob(uploadTarget.uploadUrl, file);
+      displayResults(uploadTarget);
+      fetchExistingVideos();
+    } catch (error) {
+      console.error('Error:', error);
+      alert('Failed to process video: ' + error.message);
+    } finally {
+      showLoading(false, { trackUpload: true });
+    }
+  }
+
+  async function processVideoRequest(url, payload, options = {}) {
     showLoading(true, options);
     results.classList.add('hidden');
 
     try {
-      const result = await uploadWithProgress(url, data, options);
+      const result = await postJson(url, payload);
 
       if (result.success) {
         displayResults(result);
@@ -199,6 +217,44 @@ document.addEventListener('DOMContentLoaded', () => {
     } finally {
       showLoading(false, options);
     }
+  }
+
+  async function requestUploadTarget(file) {
+    return postJson('/api/videos/upload-target', {
+      filename: file.name,
+      contentType: file.type,
+      size: file.size,
+    });
+  }
+
+  async function postJson(url, payload) {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const rawResponse = await response.text();
+    let parsed = {};
+
+    if (rawResponse) {
+      try {
+        parsed = JSON.parse(rawResponse);
+      } catch (error) {
+        throw new Error('Received an invalid server response.');
+      }
+    }
+
+    if (response.ok) {
+      return parsed;
+    }
+
+    const serverMessage = parsed && typeof parsed === 'object' && 'error' in parsed
+      ? parsed.error
+      : undefined;
+    throw new Error(serverMessage || 'Processing failed');
   }
 
   function showLoading(show, options = {}) {
@@ -244,13 +300,31 @@ document.addEventListener('DOMContentLoaded', () => {
     uploadProgressText.textContent = message;
   }
 
-  function uploadWithProgress(url, data, options = {}) {
+  function extractBlobErrorMessage(status, responseText) {
+    if (!responseText) {
+      return `Blob upload failed with status ${status}.`;
+    }
+
+    const messageMatch = responseText.match(/<Message>([\s\S]*?)<\/Message>/i);
+    if (messageMatch && messageMatch[1]) {
+      return messageMatch[1].trim();
+    }
+
+    return responseText.trim().slice(0, 300) || `Blob upload failed with status ${status}.`;
+  }
+
+  function uploadFileToBlob(uploadUrl, file) {
     return new Promise((resolve, reject) => {
       const request = new XMLHttpRequest();
-      request.open('POST', url);
+      request.open('PUT', uploadUrl);
       request.responseType = 'text';
+      request.setRequestHeader('x-ms-blob-type', 'BlockBlob');
+      request.setRequestHeader('x-ms-blob-content-type', file.type || 'application/octet-stream');
+      if (file.type) {
+        request.setRequestHeader('Content-Type', file.type);
+      }
 
-      if (options.trackUpload && request.upload) {
+      if (request.upload) {
         request.upload.addEventListener('progress', (event) => {
           if (!event.lengthComputable) {
             updateUploadProgress(0, 'Uploading video...');
@@ -262,34 +336,20 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         request.upload.addEventListener('load', () => {
-          updateUploadProgress(100, 'Upload complete. Waiting for server response...');
+          updateUploadProgress(100, 'Upload complete. Waiting for processing pipeline...');
           if (loadingMessage) {
-            loadingMessage.textContent = 'Upload finished. Starting processing pipeline...';
+            loadingMessage.textContent = 'Upload finished. Waiting for the processing pipeline to start...';
           }
         });
-      } else if (loadingMessage) {
-        loadingMessage.textContent = 'Submitting your request...';
       }
 
       request.addEventListener('load', () => {
-        let payload = {};
-
-        try {
-          payload = request.responseText ? JSON.parse(request.responseText) : {};
-        } catch (error) {
-          reject(new Error('Received an invalid server response.'));
-          return;
-        }
-
         if (request.status >= 200 && request.status < 300) {
-          resolve(payload);
+          resolve();
           return;
         }
 
-        const serverMessage = payload && typeof payload === 'object' && 'error' in payload
-          ? payload.error
-          : undefined;
-        reject(new Error(serverMessage || 'Processing failed'));
+        reject(new Error(extractBlobErrorMessage(request.status, request.responseText)));
       });
 
       request.addEventListener('error', () => {
@@ -300,7 +360,7 @@ document.addEventListener('DOMContentLoaded', () => {
         reject(new Error('Upload was cancelled.'));
       });
 
-      request.send(data);
+      request.send(file);
     });
   }
 

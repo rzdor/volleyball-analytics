@@ -1,11 +1,8 @@
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
 import { randomUUID } from 'crypto';
 import { BlobServiceClient } from '@azure/storage-blob';
 import { InvocationContext, app } from '@azure/functions';
 import { getProcessingQueue } from '../services/processingQueue';
-import { downloadVideoFromUrl, VideoDownloadError } from '../services/remoteVideoDownloader';
+import { downloadVideoToBlob, VideoDownloadError } from '../services/remoteVideoDownloader';
 import { getVideoRecordStore } from '../services/videoRecordStore';
 import { VideoUrlImportMessage } from '../services/urlImportQueue';
 import { ProcessingJobMessage } from '../types/processing';
@@ -23,13 +20,13 @@ function getMaxVideoBytes(): number {
   return Number.isFinite(configured) && configured > 0 ? configured : 5 * 1024 * 1024 * 1024;
 }
 
-async function uploadImportedFile(containerName: string, blobName: string, filePath: string): Promise<string> {
+function getImportedBlobClient(containerName: string, blobName: string) {
   const blobService = BlobServiceClient.fromConnectionString(getStorageConnectionString());
   const containerClient = blobService.getContainerClient(containerName);
-  await containerClient.createIfNotExists();
-  const blockBlobClient = containerClient.getBlockBlobClient(blobName);
-  await blockBlobClient.uploadFile(filePath);
-  return blockBlobClient.url;
+  return {
+    containerClient,
+    blockBlobClient: containerClient.getBlockBlobClient(blobName),
+  };
 }
 
 function parseQueueMessage(queueEntry: unknown): VideoUrlImportMessage {
@@ -52,7 +49,6 @@ function getErrorMessage(error: unknown): string {
 export async function importVideoFromUrlHandler(queueEntry: unknown, context: InvocationContext): Promise<void> {
   const recordStore = getVideoRecordStore();
   const convertQueue = getProcessingQueue('convert');
-  let tempFilePath: string | undefined;
 
   try {
     const message = parseQueueMessage(queueEntry);
@@ -72,15 +68,13 @@ export async function importVideoFromUrlHandler(queueEntry: unknown, context: In
     }
 
     const importStartedAt = await recordStore.markImportProcessing(message.recordId);
-    const tempDir = path.join(os.tmpdir(), 'va-url-imports', randomUUID());
-    fs.mkdirSync(tempDir, { recursive: true });
-    tempFilePath = await downloadVideoFromUrl(
+    const { containerClient, blockBlobClient } = getImportedBlobClient(message.sourceContainer, message.sourceBlobName);
+    await containerClient.createIfNotExists();
+    const blobUrl = await downloadVideoToBlob(
       message.requestedVideoUrl,
-      tempDir,
+      blockBlobClient,
       getMaxVideoBytes()
     );
-
-    const blobUrl = await uploadImportedFile(message.sourceContainer, message.sourceBlobName, tempFilePath);
     const convertJob: ProcessingJobMessage = {
       version: 1,
       jobType: 'convert',
@@ -118,10 +112,6 @@ export async function importVideoFromUrlHandler(queueEntry: unknown, context: In
 
     if (error instanceof VideoDownloadError) {
       return;
-    }
-  } finally {
-    if (tempFilePath && fs.existsSync(tempFilePath)) {
-      fs.unlinkSync(tempFilePath);
     }
   }
 }

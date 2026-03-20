@@ -192,8 +192,8 @@ export class VideoRecordStore {
 
   async markConvertCompletedAndQueueTrim(
     recordId: string,
-    convertedBlobName: string,
-    convertedBlobUrl: string,
+    convertedBlobName: string | undefined,
+    convertedBlobUrl: string | undefined,
     convertStartedAt: string,
     trimJobToken: string
   ): Promise<void> {
@@ -202,8 +202,6 @@ export class VideoRecordStore {
       status: 'queued',
       currentStage: 'trim',
       lastJobType: 'trim',
-      convertedBlobName,
-      convertedBlobUrl,
       queuedAt: now,
       convertCompletedAt: now,
       convertDurationMs: toDurationMs(convertStartedAt, now),
@@ -215,6 +213,8 @@ export class VideoRecordStore {
       trimFailedAt: '',
       errorMessage: '',
       failedAt: '',
+      ...(convertedBlobName ? { convertedBlobName } : {}),
+      ...(convertedBlobUrl ? { convertedBlobUrl } : {}),
     });
   }
 

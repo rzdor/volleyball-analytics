@@ -1,5 +1,11 @@
 import ffmpeg from 'fluent-ffmpeg';
 
+export const TARGET_CONVERT_HEIGHT = 720;
+
+export function shouldConvertTo720p(sourceHeight: number): boolean {
+  return sourceHeight > TARGET_CONVERT_HEIGHT;
+}
+
 export async function convertVideoTo720p(inputPath: string, outputPath: string): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     ffmpeg(inputPath)

@@ -5,11 +5,12 @@ import { randomUUID } from 'crypto';
 import { DequeuedMessageItem } from '@azure/storage-queue';
 import { detectPlayers } from './services/playerDetector';
 import { downloadBlobToFile } from './services/blobUtils';
+import { getVideoMetadata } from './services/frameExtractor';
 import { buildPlayerManifest } from './services/playerProfiles';
 import { getProcessingQueue, ProcessingQueueName } from './services/processingQueue';
 import { createVideoStorage } from './services/storageProvider';
 import { NoSegmentsDetectedError, runTrimPipeline } from './services/trimPipeline';
-import { convertVideoTo720p } from './services/videoConverter';
+import { convertVideoTo720p, shouldConvertTo720p } from './services/videoConverter';
 import { getVideoRecordStore } from './services/videoRecordStore';
 import { ProcessingJobMessage } from './types/processing';
 
@@ -85,18 +86,36 @@ async function runConvertJob(job: ProcessingJobMessage, retryCount: number): Pro
   const convertedFilename = path.posix.join(job.recordId, `${sourceBaseName}-720p.mp4`);
   const localConvertedPath = path.join(storage.getLocalOutputDir(), convertedFilename);
 
-  fs.mkdirSync(path.dirname(localConvertedPath), { recursive: true });
-
   try {
     await downloadBlobToFile({
       containerName: job.sourceContainer,
       blobName: job.sourceBlobName,
     }, tempInputPath);
 
-    await convertVideoTo720p(tempInputPath, localConvertedPath);
+    const metadata = await getVideoMetadata(tempInputPath);
+    if (metadata.height <= 0) {
+      throw new Error(`Unable to determine source video height for ${job.sourceBlobName}`);
+    }
 
-    const storedConverted = await storage.saveOutput(localConvertedPath, convertedFilename);
-    const convertedBlobName = `processed/${storedConverted.name}`;
+    let convertedBlobName: string | undefined;
+    let convertedBlobUrl: string | undefined;
+
+    if (shouldConvertTo720p(metadata.height)) {
+      fs.mkdirSync(path.dirname(localConvertedPath), { recursive: true });
+      await convertVideoTo720p(tempInputPath, localConvertedPath);
+
+      const storedConverted = await storage.saveOutput(localConvertedPath, convertedFilename);
+      convertedBlobName = `processed/${storedConverted.name}`;
+      convertedBlobUrl = storedConverted.url;
+    } else {
+      console.log('[worker] Skipping conversion for source already at or below 720p', {
+        recordId: job.recordId,
+        sourceBlobName: job.sourceBlobName,
+        width: metadata.width,
+        height: metadata.height,
+      });
+    }
+
     const trimJob: ProcessingJobMessage = {
       version: 1,
       jobType: 'trim',
@@ -104,21 +123,22 @@ async function runConvertJob(job: ProcessingJobMessage, retryCount: number): Pro
       recordId: job.recordId,
       sourceContainer: job.sourceContainer,
       sourceBlobName: job.sourceBlobName,
-      convertedBlobName,
+      ...(convertedBlobName ? { convertedBlobName } : {}),
     };
 
     await trimQueue.enqueue(trimJob);
     await recordStore.markConvertCompletedAndQueueTrim(
       job.recordId,
       convertedBlobName,
-      storedConverted.url,
+      convertedBlobUrl,
       convertStartedAt,
       trimJob.jobToken
     );
 
     console.log('[worker] Convert job completed', {
       recordId: job.recordId,
-      convertedBlobName,
+      convertedBlobName: convertedBlobName ?? job.sourceBlobName,
+      skippedConversion: !convertedBlobName,
       trimJobToken: trimJob.jobToken,
     });
   } finally {

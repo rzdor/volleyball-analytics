@@ -155,7 +155,33 @@
       "name": "[format('{0}/default', variables('storageAccountName'))]",
       "dependsOn": [
         "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
-      ]
+      ],
+      "properties": {
+        "cors": {
+          "corsRules": [
+            {
+              "allowedOrigins": [
+                "[format('https://{0}.azurewebsites.net', variables('webAppName'))]",
+                "http://localhost:3000",
+                "http://127.0.0.1:3000"
+              ],
+              "allowedMethods": [
+                "GET",
+                "HEAD",
+                "OPTIONS",
+                "PUT"
+              ],
+              "allowedHeaders": [
+                "*"
+              ],
+              "exposedHeaders": [
+                "*"
+              ],
+              "maxAgeInSeconds": 3600
+            }
+          ]
+        }
+      }
     },
     {
       "type": "Microsoft.Storage/storageAccounts/tableServices",
