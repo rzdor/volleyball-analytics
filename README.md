@@ -192,7 +192,8 @@ curl -X POST http://localhost:3000/api/videos/analyze-url \
 
 ## Motion-Based Video Trimming
 
-`POST /api/videos/trim` removes non-play periods from a static-camera recording using motion detection.  
+`POST /api/videos/trim` removes non-play periods from a static-camera recording using motion detection.
+`POST /api/videos/import-from-url` queues the URL-based import pipeline for a publicly accessible video file.
 No AI or third-party services are required — only ffmpeg.
 
 ### How It Works

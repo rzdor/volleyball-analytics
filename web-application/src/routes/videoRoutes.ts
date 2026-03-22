@@ -167,6 +167,29 @@ async function queueVideoUrlImport(videoUrl: string): Promise<Record<string, unk
   return payload;
 }
 
+async function handleVideoUrlImportRequest(req: Request, res: Response): Promise<void> {
+  try {
+    const videoUrlValue = typeof req.body?.videoUrl === 'string' ? req.body.videoUrl.trim() : '';
+    if (!videoUrlValue) {
+      res.status(400).json({ error: 'videoUrl is required.' });
+      return;
+    }
+
+    const importResult = await queueVideoUrlImport(videoUrlValue);
+    res.status(202).json(importResult);
+  } catch (handlerError) {
+    console.error('Video URL import error:', handlerError);
+
+    if (handlerError instanceof VideoImportRequestError) {
+      res.status(handlerError.statusCode).json({ error: handlerError.message });
+      return;
+    }
+
+    const errorMessage = handlerError instanceof Error ? handlerError.message : 'Failed to queue video import';
+    res.status(500).json({ error: errorMessage });
+  }
+}
+
 function getBlobServiceClient(): BlobServiceClient {
   return BlobServiceClient.fromConnectionString(getStorageConnectionString());
 }
@@ -593,28 +616,9 @@ router.post('/upload-target', rateLimit({ windowMs: 60_000, limit: 20, standardH
   }
 });
 
-router.post('/trim', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: true, legacyHeaders: false }), async (req: Request, res: Response): Promise<void> => {
-  try {
-    const videoUrlValue = typeof req.body?.videoUrl === 'string' ? req.body.videoUrl.trim() : '';
-    if (!videoUrlValue) {
-      res.status(400).json({ error: 'No video URL provided.' });
-      return;
-    }
+router.post('/trim', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: true, legacyHeaders: false }), handleVideoUrlImportRequest);
 
-    const importResult = await queueVideoUrlImport(videoUrlValue);
-    res.status(202).json(importResult);
-  } catch (handlerError) {
-    console.error('Video URL import error:', handlerError);
-
-    if (handlerError instanceof VideoImportRequestError) {
-      res.status(handlerError.statusCode).json({ error: handlerError.message });
-      return;
-    }
-
-    const errorMessage = handlerError instanceof Error ? handlerError.message : 'Failed to queue video import';
-    res.status(500).json({ error: errorMessage });
-  }
-});
+router.post('/import-from-url', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: true, legacyHeaders: false }), handleVideoUrlImportRequest);
 
 router.get('/config', (_req: Request, res: Response): void => {
   res.json({

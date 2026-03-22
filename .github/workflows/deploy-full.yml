@@ -51,6 +51,10 @@ on:
         description: 'How long to wait for the Function App to expose functions before EventGrid deploy'
         type: string
         default: '300'
+      run_sample_video_import:
+        description: 'Run the sample post-deploy video URL import script'
+        type: boolean
+        default: false
 
 env:
   AZURE_RESOURCE_GROUP: 'volleyball-rg-1'
@@ -341,3 +345,22 @@ jobs:
         template: deployment/monitoring-workbook.json
         parameters: deployment/monitoring-workbook.parameters.json
         deploymentMode: Incremental
+
+  import_sample_video:
+    needs: [approve, build_and_deploy_web, build_and_deploy_functions, build_and_deploy_worker, deploy_eventgrid, deploy_monitoring]
+    if: ${{ always() && inputs.run_sample_video_import && needs.approve.result == 'success' && (needs.build_and_deploy_web.result == 'success' || needs.build_and_deploy_web.result == 'skipped') && (needs.build_and_deploy_functions.result == 'success' || needs.build_and_deploy_functions.result == 'skipped') && (needs.build_and_deploy_worker.result == 'success' || needs.build_and_deploy_worker.result == 'skipped') && (needs.deploy_eventgrid.result == 'success' || needs.deploy_eventgrid.result == 'skipped') && (needs.deploy_monitoring.result == 'success' || needs.deploy_monitoring.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    environment:
+      name: 'Development'
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+
+    - name: Import sample video URL
+      env:
+        WEB_APP_BASE_URL: https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net
+      run: node deployment/scripts/import-sample-video.mjs
