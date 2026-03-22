@@ -73,6 +73,9 @@ type VideoStatusRecord = {
   detectionBlobUrl?: string;
   playerManifestBlobName?: string;
   playerManifestBlobUrl?: string;
+  playDescriptionsBlobName?: string;
+  playDescriptionsBlobUrl?: string;
+  playCount?: number;
   detectedPlayerCount?: number;
   errorMessage?: string;
 };
@@ -108,6 +111,39 @@ type PlayerManifestRecord = {
     imageBlobName?: string;
     displayName?: string;
     notes?: string;
+  }>;
+};
+
+type PlayDescriptionsRecord = {
+  recordId: string;
+  generatedAt: string;
+  sourceVideoBlobName: string;
+  processedBlobName: string;
+  playCount: number;
+  plays: Array<{
+    playIndex: number;
+    sourceStartSeconds: number;
+    sourceEndSeconds: number;
+    trimmedStartSeconds: number;
+    trimmedEndSeconds: number;
+    sceneBlobName: string;
+    sceneBlobUrl?: string;
+    contactedPlayers: Array<{
+      trackId: number;
+      teamId: number;
+      teamSide?: 'main' | 'opponent';
+      firstContactTimestamp: number;
+      contactCount: number;
+    }>;
+    contacts: Array<{
+      playerTrackId: number;
+      teamId: number;
+      teamSide?: 'main' | 'opponent';
+      frameIndex: number;
+      timestamp: number;
+      distanceToBallPx: number;
+      ballConfidence: number;
+    }>;
   }>;
 };
 
@@ -374,6 +410,9 @@ function mapStatusResponse(record: VideoStatusRecord) {
     detectionBlobUrl: record.detectionBlobName ? createBlobUrl(record.sourceContainer, record.detectionBlobName) : record.detectionBlobUrl,
     playerManifestBlobName: record.playerManifestBlobName,
     playerManifestBlobUrl: record.playerManifestBlobName ? createBlobUrl(record.sourceContainer, record.playerManifestBlobName) : record.playerManifestBlobUrl,
+    playDescriptionsBlobName: record.playDescriptionsBlobName,
+    playDescriptionsBlobUrl: record.playDescriptionsBlobName ? createBlobUrl(record.sourceContainer, record.playDescriptionsBlobName) : record.playDescriptionsBlobUrl,
+    playCount: record.playCount,
     detectedPlayerCount: record.detectedPlayerCount,
     import: {
       queuedAt: record.importQueuedAt,
@@ -490,6 +529,21 @@ async function loadPlayerManifest(record: VideoStatusRecord): Promise<PlayerMani
   }
 }
 
+async function loadPlayDescriptions(record: VideoStatusRecord): Promise<PlayDescriptionsRecord | undefined> {
+  if (!record.playDescriptionsBlobName) {
+    return undefined;
+  }
+
+  try {
+    return await readJsonBlob<PlayDescriptionsRecord>(record.sourceContainer, record.playDescriptionsBlobName);
+  } catch (error) {
+    if (typeof error === 'object' && error !== null && 'statusCode' in error && Number((error as { statusCode?: number }).statusCode) === 404) {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
 function buildPlayerManifestResponse(record: VideoStatusRecord, manifest: PlayerManifestRecord | undefined) {
   if (!manifest) {
     return {
@@ -504,6 +558,26 @@ function buildPlayerManifestResponse(record: VideoStatusRecord, manifest: Player
       ...player,
       imageUrl: player.imageBlobName ? createBlobUrl(record.sourceContainer, player.imageBlobName) : undefined,
       imageDownloadUrl: player.imageBlobName ? createBlobUrl(record.sourceContainer, player.imageBlobName, true) : undefined,
+    })),
+  };
+}
+
+function buildPlayDescriptionsResponse(record: VideoStatusRecord, manifest: PlayDescriptionsRecord | undefined) {
+  if (!manifest) {
+    return {
+      generatedAt: undefined,
+      playCount: 0,
+      plays: [],
+    };
+  }
+
+  return {
+    generatedAt: manifest.generatedAt,
+    playCount: manifest.playCount,
+    plays: manifest.plays.map(play => ({
+      ...play,
+      sceneUrl: createBlobUrl(record.sourceContainer, play.sceneBlobName),
+      sceneDownloadUrl: createBlobUrl(record.sourceContainer, play.sceneBlobName, true),
     })),
   };
 }
@@ -680,6 +754,7 @@ router.get('/:recordId/details', rateLimit({ windowMs: 60_000, limit: 120, stand
     );
     const detectionSummary = await loadDetectionSummary(record);
     const playerManifest = await loadPlayerManifest(record);
+    const playDescriptions = await loadPlayDescriptions(record);
 
     res.json({
       ...mapStatusResponse(record),
@@ -691,10 +766,38 @@ router.get('/:recordId/details', rateLimit({ windowMs: 60_000, limit: 120, stand
       detectionSummary,
       playersPageUrl: `/videos/${encodeURIComponent(record.recordId)}/players`,
       playerManifest: buildPlayerManifestResponse(record, playerManifest),
+      playDescriptions: buildPlayDescriptionsResponse(record, playDescriptions),
     });
   } catch (error) {
     console.error('Video details error:', error);
     res.status(500).json({ error: 'Failed to load video details' });
+  }
+});
+
+router.get('/:recordId/plays', rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: true, legacyHeaders: false }), async (req: Request, res: Response): Promise<void> => {
+  try {
+    const recordIdParam = req.params.recordId;
+    const recordId = typeof recordIdParam === 'string' ? recordIdParam.trim() : '';
+    if (!recordId) {
+      res.status(400).json({ error: 'recordId is required' });
+      return;
+    }
+
+    const record = await getVideoRecord(recordId);
+    if (!record) {
+      res.status(404).json({ error: 'Video plays not found', recordId });
+      return;
+    }
+
+    const playDescriptions = await loadPlayDescriptions(record);
+    res.json({
+      ...mapStatusResponse(record),
+      videoDetailsUrl: `/videos/${encodeURIComponent(record.recordId)}`,
+      playDescriptions: buildPlayDescriptionsResponse(record, playDescriptions),
+    });
+  } catch (error) {
+    console.error('Play descriptions error:', error);
+    res.status(500).json({ error: 'Failed to load play descriptions' });
   }
 });
 

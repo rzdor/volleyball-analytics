@@ -24,6 +24,7 @@ from sklearn.cluster import KMeans
 from ultralytics import YOLO
 
 PERSON_CLASS_ID = 0
+BALL_CLASS_ID = 32
 MAIN_TEAM_SIDE = "main"
 OPPONENT_TEAM_SIDE = "opponent"
 
@@ -118,12 +119,13 @@ def run_detection(
             frame,
             persist=True,
             conf=confidence,
-            classes=[PERSON_CLASS_ID],
+            classes=[PERSON_CLASS_ID, BALL_CLASS_ID],
             verbose=False,
             tracker="bytetrack.yaml",
         )
 
         frame_players = []
+        frame_balls = []
         result = results[0]
 
         if result.boxes is not None and len(result.boxes) > 0:
@@ -132,22 +134,31 @@ def run_detection(
                 box = boxes[i]
                 x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
                 conf = float(box.conf[0].cpu().numpy())
-                track_id = int(box.id[0].cpu().numpy()) if box.id is not None else -1
+                class_id = int(box.cls[0].cpu().numpy())
+                bbox = {"x": int(x1), "y": int(y1), "w": int(x2 - x1), "h": int(y2 - y1)}
 
-                color_hist = extract_jersey_color(frame, (x1, y1, x2, y2))
+                if class_id == PERSON_CLASS_ID:
+                    track_id = int(box.id[0].cpu().numpy()) if box.id is not None else -1
+                    color_hist = extract_jersey_color(frame, (x1, y1, x2, y2))
 
-                frame_players.append({
-                    "trackId": track_id,
-                    "bbox": {"x": int(x1), "y": int(y1), "w": int(x2 - x1), "h": int(y2 - y1)},
-                    "confidence": round(conf, 3),
-                    "colorHist": color_hist,
-                    "jerseyColor": None,  # filled after clustering
-                })
+                    frame_players.append({
+                        "trackId": track_id,
+                        "bbox": bbox,
+                        "confidence": round(conf, 3),
+                        "colorHist": color_hist,
+                        "jerseyColor": None,  # filled after clustering
+                    })
+                elif class_id == BALL_CLASS_ID:
+                    frame_balls.append({
+                        "bbox": bbox,
+                        "confidence": round(conf, 3),
+                    })
 
         raw_frames.append({
             "frameIndex": frame_idx,
             "timestamp": round(timestamp, 3),
             "players": frame_players,
+            "balls": frame_balls,
         })
 
         frame_idx += 1
@@ -354,6 +365,7 @@ def build_output(
             "frameIndex": frame_data["frameIndex"],
             "timestamp": frame_data["timestamp"],
             "players": players,
+            "balls": frame_data.get("balls", []),
         })
 
     # Build track summaries

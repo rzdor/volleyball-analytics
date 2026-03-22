@@ -19,6 +19,11 @@ export interface PlayerBbox {
 
 export type TeamSide = 'main' | 'opponent';
 
+export interface BallDetection {
+  bbox: PlayerBbox;
+  confidence: number;
+}
+
 export interface FramePlayer {
   trackId: number;
   teamId: number;
@@ -31,6 +36,7 @@ export interface FrameDetection {
   frameIndex: number;
   timestamp: number;
   players: FramePlayer[];
+  balls: BallDetection[];
 }
 
 export interface TeamInfo {

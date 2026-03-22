@@ -245,6 +245,9 @@ export class VideoRecordStore {
       detectJobToken,
       detectErrorMessage: '',
       detectFailedAt: '',
+      playDescriptionsBlobName: '',
+      playDescriptionsBlobUrl: '',
+      playCount: 0,
       errorMessage: '',
       failedAt: '',
     });
@@ -257,7 +260,10 @@ export class VideoRecordStore {
     detectStartedAt: string,
     playerManifestBlobName?: string,
     playerManifestBlobUrl?: string,
-    detectedPlayerCount?: number
+    detectedPlayerCount?: number,
+    playDescriptionsBlobName?: string,
+    playDescriptionsBlobUrl?: string,
+    playCount?: number
   ): Promise<void> {
     const now = new Date().toISOString();
     await this.update(recordId, {
@@ -269,6 +275,9 @@ export class VideoRecordStore {
       detectionBlobUrl,
       playerManifestBlobName,
       playerManifestBlobUrl,
+      playDescriptionsBlobName,
+      playDescriptionsBlobUrl,
+      playCount,
       detectedPlayerCount,
       detectCompletedAt: now,
       detectDurationMs: toDurationMs(detectStartedAt, now),

@@ -5,8 +5,10 @@ import { randomUUID } from 'crypto';
 import { DequeuedMessageItem } from '@azure/storage-queue';
 import { detectPlayers } from './services/playerDetector';
 import { downloadBlobToFile } from './services/blobUtils';
+import { inferPlayerBallContacts } from './services/contactDetector';
 import { getVideoMetadata } from './services/frameExtractor';
 import { buildPlayerManifest } from './services/playerProfiles';
+import { buildPlayDescriptionsManifest, buildPlaySceneManifest, PlaySceneManifest } from './services/playDescriptions';
 import { getProcessingQueue, ProcessingQueueName } from './services/processingQueue';
 import { createVideoStorage } from './services/storageProvider';
 import { NoSegmentsDetectedError, runTrimPipeline } from './services/trimPipeline';
@@ -47,6 +49,14 @@ function parseJobMessage(messageText: string): ProcessingJobMessage {
 function getTempVideoPath(prefix: string, blobName: string): string {
   const filename = `${prefix}-${randomUUID()}-${path.basename(blobName)}`;
   return path.join(os.tmpdir(), 'va-processing-worker', 'inputs', filename);
+}
+
+function getPlaySceneManifestRelativePath(recordId: string): string {
+  return path.posix.join(recordId, 'plays', 'scenes.json');
+}
+
+function getPlayManifestRelativePath(recordId: string): string {
+  return path.posix.join(recordId, 'plays', 'manifest.json');
 }
 
 function getErrorMessage(error: unknown): string {
@@ -173,6 +183,18 @@ async function runTrimJob(job: ProcessingJobMessage, retryCount: number): Promis
       sceneOutputPrefix: job.recordId,
     });
     const processedBlobName = `processed/${trimResult.storedOutput.name}`;
+    const playSceneManifest = buildPlaySceneManifest({
+      recordId: job.recordId,
+      sourceVideoBlobName: job.sourceBlobName,
+      processedBlobName,
+      segments: trimResult.segments,
+      storedScenes: trimResult.storedScenes,
+    });
+    const playSceneManifestRelativePath = getPlaySceneManifestRelativePath(job.recordId);
+    const playSceneManifestOutputPath = path.join(storage.getLocalOutputDir(), playSceneManifestRelativePath);
+    fs.mkdirSync(path.dirname(playSceneManifestOutputPath), { recursive: true });
+    fs.writeFileSync(playSceneManifestOutputPath, JSON.stringify(playSceneManifest, null, 2));
+    await storage.saveOutput(playSceneManifestOutputPath, playSceneManifestRelativePath);
 
     const detectJob: ProcessingJobMessage = {
       version: 1,
@@ -207,6 +229,11 @@ async function runTrimJob(job: ProcessingJobMessage, retryCount: number): Promis
     if (fs.existsSync(tempInputPath)) {
       fs.unlinkSync(tempInputPath);
     }
+
+    const playSceneManifestOutputPath = path.join(storage.getLocalOutputDir(), getPlaySceneManifestRelativePath(job.recordId));
+    if (storage.isRemoteStorage() && fs.existsSync(playSceneManifestOutputPath)) {
+      fs.unlinkSync(playSceneManifestOutputPath);
+    }
   }
 }
 
@@ -214,14 +241,21 @@ async function runDetectJob(job: ProcessingJobMessage, retryCount: number): Prom
   const detectStartedAt = await recordStore.markProcessing(job.recordId, 'detect', retryCount);
 
   const tempInputPath = getTempVideoPath('detect', job.processedBlobName!);
+  const playSceneManifestPath = path.join(storage.getLocalOutputDir(), getPlaySceneManifestRelativePath(job.recordId));
+  const playManifestPath = path.join(storage.getLocalOutputDir(), getPlayManifestRelativePath(job.recordId));
+  const detectionDir = storage.getLocalDetectionDir();
 
   try {
     await downloadBlobToFile({
       containerName: job.sourceContainer,
       blobName: job.processedBlobName!,
     }, tempInputPath);
+    await downloadBlobToFile({
+      containerName: job.sourceContainer,
+      blobName: `processed/${getPlaySceneManifestRelativePath(job.recordId)}`,
+    }, playSceneManifestPath);
 
-    const detectionDir = storage.getLocalDetectionDir();
+    const playSceneManifest = JSON.parse(fs.readFileSync(playSceneManifestPath, 'utf-8')) as PlaySceneManifest;
     const result = await detectPlayers(tempInputPath, detectionDir);
     const detectionFilename = `${path.basename(job.processedBlobName!, path.extname(job.processedBlobName!))}-detection.json`;
     const detectionJsonPath = path.join(detectionDir, detectionFilename);
@@ -236,6 +270,17 @@ async function runDetectJob(job: ProcessingJobMessage, retryCount: number): Prom
       detectionResult: result,
       storage,
     });
+    const contactEvents = inferPlayerBallContacts(result);
+    const playDescriptions = buildPlayDescriptionsManifest({
+      recordId: job.recordId,
+      sourceVideoBlobName: job.sourceBlobName,
+      processedBlobName: job.processedBlobName!,
+      sceneManifest: playSceneManifest,
+      contactEvents,
+    });
+    fs.mkdirSync(path.dirname(playManifestPath), { recursive: true });
+    fs.writeFileSync(playManifestPath, JSON.stringify(playDescriptions, null, 2));
+    const storedPlayManifest = await storage.saveOutput(playManifestPath, getPlayManifestRelativePath(job.recordId));
 
     await recordStore.markDetectCompleted(
       job.recordId,
@@ -244,13 +289,18 @@ async function runDetectJob(job: ProcessingJobMessage, retryCount: number): Prom
       detectStartedAt,
       playerManifestResult.manifestBlobName,
       playerManifestResult.manifestUrl,
-      playerManifestResult.manifest.players.length
+      playerManifestResult.manifest.players.length,
+      `processed/${storedPlayManifest.name}`,
+      storedPlayManifest.url,
+      playDescriptions.playCount
     );
 
     console.log('[worker] Detect job completed', {
       recordId: job.recordId,
       detectionBlobName: `detections/${storedDetection.name}`,
       playerManifestBlobName: playerManifestResult.manifestBlobName,
+      playDescriptionsBlobName: `processed/${storedPlayManifest.name}`,
+      playCount: playDescriptions.playCount,
       detectedPlayerCount: playerManifestResult.manifest.players.length,
     });
 
@@ -260,6 +310,14 @@ async function runDetectJob(job: ProcessingJobMessage, retryCount: number): Prom
   } finally {
     if (fs.existsSync(tempInputPath)) {
       fs.unlinkSync(tempInputPath);
+    }
+
+    if (storage.isRemoteStorage() && fs.existsSync(playSceneManifestPath)) {
+      fs.unlinkSync(playSceneManifestPath);
+    }
+
+    if (storage.isRemoteStorage() && fs.existsSync(playManifestPath)) {
+      fs.unlinkSync(playManifestPath);
     }
   }
 }

@@ -48,6 +48,9 @@ const SAMPLE_RESULT: DetectionResult = {
     {
       frameIndex: 0,
       timestamp: 0,
+      balls: [
+        { bbox: { x: 130, y: 190, w: 24, h: 24 }, confidence: 0.89 },
+      ],
       players: [
         { trackId: 1, teamId: 0, teamSide: 'main', bbox: { x: 100, y: 200, w: 50, h: 100 }, confidence: 0.95 },
       ],
@@ -119,6 +122,7 @@ describe('playerDetector', () => {
     expect(result.frames).toHaveLength(1);
     expect(result.teams[0].dominantColor).toEqual([255, 50, 50]);
     expect(result.teams[0].side).toBe('main');
+    expect(result.frames[0].balls[0].confidence).toBe(0.89);
     expect(result.frames[0].players[0].teamSide).toBe('main');
     expect(result.tracks[0].teamSide).toBe('main');
   });
