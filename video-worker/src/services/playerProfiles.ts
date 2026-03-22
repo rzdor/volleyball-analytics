@@ -1,12 +1,13 @@
 import fs from 'fs';
 import path from 'path';
 import ffmpeg from 'fluent-ffmpeg';
-import { DetectionResult, FramePlayer } from './playerDetector';
+import { DetectionResult, FramePlayer, TeamSide } from './playerDetector';
 import { VideoStorage } from './storageProvider';
 
 export interface PlayerProfileEntry {
   trackId: number;
   teamId: number;
+  teamSide?: TeamSide;
   frameCount: number;
   avgConfidence: number;
   bestConfidence?: number;
@@ -152,6 +153,7 @@ export async function buildPlayerManifest(params: {
     players.push({
       trackId: track.trackId,
       teamId: track.teamId,
+      teamSide: track.teamSide,
       frameCount: track.frameCount,
       avgConfidence: track.avgConfidence,
       bestConfidence: candidate?.player.confidence,

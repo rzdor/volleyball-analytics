@@ -24,6 +24,8 @@ from sklearn.cluster import KMeans
 from ultralytics import YOLO
 
 PERSON_CLASS_ID = 0
+MAIN_TEAM_SIDE = "main"
+OPPONENT_TEAM_SIDE = "opponent"
 
 
 def parse_args() -> argparse.Namespace:
@@ -90,6 +92,8 @@ def run_detection(
         "totalFrames": total_frames,
         "sampleFps": sample_fps,
         "frameInterval": frame_interval,
+        "frameHeight": int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+        "frameWidth": int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
     }
 
     raw_frames: list[dict[str, Any]] = []
@@ -192,9 +196,68 @@ def cluster_teams(
     return track_team_map
 
 
+def infer_team_sides(
+    raw_frames: list[dict[str, Any]],
+    track_team_map: dict[int, int],
+    num_teams: int,
+    frame_height: int,
+) -> dict[int, str]:
+    """Infer semantic team sides from vertical player positions.
+
+    Assumes the camera is behind the main team, so the main team tends to
+    appear closer to the bottom of the frame while opponents appear higher up.
+    """
+    if frame_height <= 0:
+        print("[detect] Warning: frame height unavailable; skipping team side inference", file=sys.stderr)
+        return {}
+
+    team_bottom_positions: dict[int, list[float]] = {team_id: [] for team_id in range(num_teams)}
+
+    for frame_data in raw_frames:
+        for player in frame_data["players"]:
+            team_id = track_team_map.get(player["trackId"])
+            if team_id is None or team_id < 0:
+                continue
+
+            bbox = player["bbox"]
+            bottom_ratio = (bbox["y"] + bbox["h"]) / frame_height
+            team_bottom_positions[team_id].append(bottom_ratio)
+
+    ranked_teams = [
+        (team_id, float(np.median(bottom_positions)))
+        for team_id, bottom_positions in team_bottom_positions.items()
+        if bottom_positions
+    ]
+
+    if len(ranked_teams) < 2:
+        print("[detect] Warning: not enough team position data to infer main/opponent sides", file=sys.stderr)
+        return {}
+
+    ranked_teams.sort(key=lambda item: item[1], reverse=True)
+    main_team_id = ranked_teams[0][0]
+    opponent_team_id = ranked_teams[-1][0]
+
+    team_side_map = {
+        main_team_id: MAIN_TEAM_SIDE,
+        opponent_team_id: OPPONENT_TEAM_SIDE,
+    }
+
+    for team_id, median_bottom_ratio in ranked_teams:
+        inferred_side = team_side_map.get(team_id)
+        if inferred_side:
+            print(
+                f"[detect] Team {team_id} inferred as {inferred_side} "
+                f"(median bottom ratio {median_bottom_ratio:.3f})",
+                file=sys.stderr,
+            )
+
+    return team_side_map
+
+
 def compute_dominant_color(
     raw_frames: list[dict[str, Any]],
     track_team_map: dict[int, int],
+    team_side_map: dict[int, str],
     video_path: str,
     sample_fps: float,
     num_teams: int,
@@ -253,6 +316,7 @@ def compute_dominant_color(
             "id": team_id,
             "dominantColor": rgb,
             "playerCount": player_count,
+            "side": team_side_map.get(team_id),
         })
 
     return teams
@@ -261,6 +325,7 @@ def compute_dominant_color(
 def build_output(
     raw_frames: list[dict[str, Any]],
     track_team_map: dict[int, int],
+    team_side_map: dict[int, str],
     teams: list[dict[str, Any]],
     metadata: dict[str, float],
     video_name: str,
@@ -273,12 +338,18 @@ def build_output(
         for p in frame_data["players"]:
             tid = p["trackId"]
             team_id = track_team_map.get(tid, -1)
-            players.append({
+            player_output = {
                 "trackId": tid,
                 "teamId": team_id,
                 "bbox": p["bbox"],
                 "confidence": p["confidence"],
-            })
+            }
+
+            team_side = team_side_map.get(team_id)
+            if team_side:
+                player_output["teamSide"] = team_side
+
+            players.append(player_output)
         frames_out.append({
             "frameIndex": frame_data["frameIndex"],
             "timestamp": frame_data["timestamp"],
@@ -308,14 +379,20 @@ def build_output(
     tracks = []
     for tid in sorted(track_stats.keys()):
         s = track_stats[tid]
-        tracks.append({
+        track_output = {
             "trackId": s["trackId"],
             "teamId": s["teamId"],
             "firstFrame": s["firstFrame"],
             "lastFrame": s["lastFrame"],
             "frameCount": s["frameCount"],
             "avgConfidence": round(s["totalConfidence"] / max(s["frameCount"], 1), 3),
-        })
+        }
+
+        team_side = team_side_map.get(s["teamId"])
+        if team_side:
+            track_output["teamSide"] = team_side
+
+        tracks.append(track_output)
 
     return {
         "videoName": video_name,
@@ -355,17 +432,24 @@ def main() -> None:
         sys.exit(1)
 
     track_team_map = cluster_teams(raw_frames, args.num_teams)
+    team_side_map = infer_team_sides(
+        raw_frames=raw_frames,
+        track_team_map=track_team_map,
+        num_teams=args.num_teams,
+        frame_height=int(metadata.get("frameHeight", 0)),
+    )
 
     teams = compute_dominant_color(
         raw_frames=raw_frames,
         track_team_map=track_team_map,
+        team_side_map=team_side_map,
         video_path=video_path,
         sample_fps=args.sample_fps,
         num_teams=args.num_teams,
     )
 
     video_name = Path(video_path).name
-    output = build_output(raw_frames, track_team_map, teams, metadata, video_name)
+    output = build_output(raw_frames, track_team_map, team_side_map, teams, metadata, video_name)
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w") as f:

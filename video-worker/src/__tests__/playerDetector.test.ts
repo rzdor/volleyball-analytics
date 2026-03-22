@@ -41,20 +41,20 @@ const SAMPLE_RESULT: DetectionResult = {
   totalVideoFrames: 900,
   sampledFrames: 60,
   teams: [
-    { id: 0, dominantColor: [255, 50, 50], playerCount: 6 },
-    { id: 1, dominantColor: [50, 50, 255], playerCount: 6 },
+    { id: 0, dominantColor: [255, 50, 50], playerCount: 6, side: 'main' },
+    { id: 1, dominantColor: [50, 50, 255], playerCount: 6, side: 'opponent' },
   ],
   frames: [
     {
       frameIndex: 0,
       timestamp: 0,
       players: [
-        { trackId: 1, teamId: 0, bbox: { x: 100, y: 200, w: 50, h: 100 }, confidence: 0.95 },
+        { trackId: 1, teamId: 0, teamSide: 'main', bbox: { x: 100, y: 200, w: 50, h: 100 }, confidence: 0.95 },
       ],
     },
   ],
   tracks: [
-    { trackId: 1, teamId: 0, firstFrame: 0, lastFrame: 60, frameCount: 55, avgConfidence: 0.92 },
+    { trackId: 1, teamId: 0, teamSide: 'main', firstFrame: 0, lastFrame: 60, frameCount: 55, avgConfidence: 0.92 },
   ],
 };
 
@@ -118,6 +118,9 @@ describe('playerDetector', () => {
     expect(result.tracks).toHaveLength(1);
     expect(result.frames).toHaveLength(1);
     expect(result.teams[0].dominantColor).toEqual([255, 50, 50]);
+    expect(result.teams[0].side).toBe('main');
+    expect(result.frames[0].players[0].teamSide).toBe('main');
+    expect(result.tracks[0].teamSide).toBe('main');
   });
 
   it('should reject when python process exits with non-zero code', async () => {

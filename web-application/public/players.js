@@ -67,6 +67,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     playerCards.innerHTML = manifest.players.map((player) => {
+      const teamLabel = getTeamLabel(player);
       const imageHtml = player.imageUrl
         ? `<img class="player-card-image" src="${escapeAttribute(player.imageUrl)}" alt="Player ${player.trackId}">`
         : '<div class="player-card-image player-card-image-placeholder">No image</div>';
@@ -75,7 +76,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ${imageHtml}
         <div class="player-card-body">
           <h3>Track ${escapeHtml(String(player.trackId))}</h3>
-          <p class="player-card-meta">Team ${escapeHtml(String(player.teamId))} • ${escapeHtml(String(player.frameCount))} frames • avg ${(Number(player.avgConfidence || 0)).toFixed(2)}</p>
+          <p class="player-card-meta">${escapeHtml(teamLabel)} • ${escapeHtml(String(player.frameCount))} frames • avg ${(Number(player.avgConfidence || 0)).toFixed(2)}</p>
           <label class="form-group">
             <span>Name</span>
             <input class="text-input player-name-input" type="text" value="${escapeAttribute(player.displayName || '')}" placeholder="Player name">
@@ -167,6 +168,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function formatStage(stage) {
     return (stage || 'unknown').replace(/-/g, ' ');
+  }
+
+  function getTeamLabel(player) {
+    if (player && player.teamSide === 'main') {
+      return `Main team • Team ${player.teamId}`;
+    }
+
+    if (player && player.teamSide === 'opponent') {
+      return `Opponent team • Team ${player.teamId}`;
+    }
+
+    return `Team ${player?.teamId ?? '—'}`;
   }
 
   function escapeHtml(value) {

@@ -17,9 +17,12 @@ export interface PlayerBbox {
   h: number;
 }
 
+export type TeamSide = 'main' | 'opponent';
+
 export interface FramePlayer {
   trackId: number;
   teamId: number;
+  teamSide?: TeamSide;
   bbox: PlayerBbox;
   confidence: number;
 }
@@ -34,11 +37,13 @@ export interface TeamInfo {
   id: number;
   dominantColor: [number, number, number];
   playerCount: number;
+  side?: TeamSide;
 }
 
 export interface TrackSummary {
   trackId: number;
   teamId: number;
+  teamSide?: TeamSide;
   firstFrame: number;
   lastFrame: number;
   frameCount: number;
