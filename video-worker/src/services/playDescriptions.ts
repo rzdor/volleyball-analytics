@@ -1,6 +1,7 @@
 import { StoredVideo } from './storageProvider';
 import { TimeRange } from './motionDetector';
 import { TeamSide } from './playerDetector';
+import { classifyPlayContacts } from './actionClassifier';
 
 export interface PlaySceneManifestEntry {
   playIndex: number;
@@ -28,7 +29,12 @@ export interface PlayContactEvent {
   timestamp: number;
   distanceToBallPx: number;
   ballConfidence: number;
+  actionType?: PlayActionType;
+  actionConfidence?: number;
+  actionReason?: string;
 }
+
+export type PlayActionType = 'serve' | 'pass' | 'set' | 'attack' | 'unknown';
 
 export interface ContactedPlayerSummary {
   trackId: number;
@@ -133,6 +139,10 @@ export function buildPlayDescriptionsManifest(params: {
 
     const contactedPlayers = [...contactedPlayerMap.values()]
       .sort((left, right) => left.firstContactTimestamp - right.firstContactTimestamp);
+    const classifiedContacts = classifyPlayContacts({
+      trimmedStartSeconds: play.trimmedStartSeconds,
+      contacts,
+    });
 
     return {
       playIndex: play.playIndex,
@@ -143,7 +153,7 @@ export function buildPlayDescriptionsManifest(params: {
       sceneBlobName: play.sceneBlobName,
       sceneBlobUrl: play.sceneBlobUrl,
       contactedPlayers,
-      contacts,
+      contacts: classifiedContacts,
     };
   });
 

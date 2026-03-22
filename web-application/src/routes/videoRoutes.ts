@@ -143,6 +143,9 @@ type PlayDescriptionsRecord = {
       timestamp: number;
       distanceToBallPx: number;
       ballConfidence: number;
+      actionType?: 'serve' | 'pass' | 'set' | 'attack' | 'unknown';
+      actionConfidence?: number;
+      actionReason?: string;
     }>;
   }>;
 };
