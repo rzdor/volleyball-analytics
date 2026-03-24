@@ -11,6 +11,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const assetLinks = document.getElementById('assetLinks');
   const sceneList = document.getElementById('sceneList');
   const detectionFacts = document.getElementById('detectionFacts');
+  const playActions = document.getElementById('playActions');
   const detailPreview = document.getElementById('detailPreview');
 
   const recordId = decodeURIComponent(window.location.pathname.split('/').pop() || '').trim();
@@ -95,6 +96,7 @@ document.addEventListener('DOMContentLoaded', () => {
     renderAssets(details);
     renderScenes(details.splitParts || []);
     renderDetection(details.detectionSummary, details.detectionFile);
+    renderPlayActions(details.playDescriptions, details.playerManifest);
 
     if (details.trimmedVideo && details.trimmedVideo.url) {
       detailPreview.src = details.trimmedVideo.url;
@@ -216,6 +218,86 @@ document.addEventListener('DOMContentLoaded', () => {
     ]);
   }
 
+  function renderPlayActions(playDescriptions, playerManifest) {
+    if (!playActions) {
+      return;
+    }
+
+    const plays = Array.isArray(playDescriptions?.plays) ? playDescriptions.plays : [];
+    if (!plays.length) {
+      playActions.innerHTML = '<p class="detail-empty">Play action data is not available yet.</p>';
+      return;
+    }
+
+    const playerNamesByTrackId = new Map(
+      (Array.isArray(playerManifest?.players) ? playerManifest.players : []).map((player) => {
+        const preferredName = typeof player.displayName === 'string' && player.displayName.trim()
+          ? player.displayName.trim()
+          : `Track ${player.trackId}`;
+        return [player.trackId, preferredName];
+      })
+    );
+
+    playActions.innerHTML = plays.map((play) => {
+      const contacts = Array.isArray(play.contacts) ? play.contacts : [];
+      const contactedPlayers = Array.isArray(play.contactedPlayers) ? play.contactedPlayers : [];
+      const contactedSummary = contactedPlayers.length
+        ? contactedPlayers.map((player) => {
+            const name = playerNamesByTrackId.get(player.trackId) || `Track ${player.trackId}`;
+            return `${name} (${player.contactCount})`;
+          }).join(', ')
+        : 'No confirmed contacts';
+
+      const contactsHtml = contacts.length
+        ? `<div class="play-action-list">${contacts.map((contact, index) => {
+            const playerName = playerNamesByTrackId.get(contact.playerTrackId) || `Track ${contact.playerTrackId}`;
+            const actionType = contact.actionType || 'unknown';
+            const reasonHtml = contact.actionReason
+              ? `<div class="play-action-reason">${escapeHtml(contact.actionReason)}</div>`
+              : '';
+            const confidenceHtml = typeof contact.actionConfidence === 'number'
+              ? `<span class="play-action-confidence">${escapeHtml(formatConfidence(contact.actionConfidence))}</span>`
+              : '';
+
+            return `<div class="play-action-item">
+              <div class="play-action-header">
+                <div class="play-action-title">
+                  <span class="play-action-index">#${index + 1}</span>
+                  <strong>${escapeHtml(playerName)}</strong>
+                  <span class="play-action-team">${escapeHtml(formatTeam(contact.teamSide, contact.teamId))}</span>
+                </div>
+                <div class="play-action-badges">
+                  <span class="play-action-badge play-action-badge-${escapeAttribute(actionType)}">${escapeHtml(formatActionType(actionType))}</span>
+                  ${confidenceHtml}
+                  <span class="play-action-time">${escapeHtml(formatSeconds(contact.timestamp))}</span>
+                </div>
+              </div>
+              ${reasonHtml}
+            </div>`;
+          }).join('')}</div>`
+        : '<p class="detail-empty">No classified contacts for this play.</p>';
+
+      const sceneLinkHtml = play.sceneUrl
+        ? `<a href="${escapeAttribute(play.sceneUrl)}" target="_blank" rel="noopener noreferrer">Open scene clip</a>`
+        : '';
+
+      return `<article class="play-card">
+        <div class="play-card-header">
+          <div>
+            <h4>Play ${escapeHtml(String((play.playIndex ?? 0) + 1))}</h4>
+            <p class="play-card-meta">
+              Source ${escapeHtml(formatSeconds(play.sourceStartSeconds))} - ${escapeHtml(formatSeconds(play.sourceEndSeconds))}
+              • Trimmed ${escapeHtml(formatSeconds(play.trimmedStartSeconds))} - ${escapeHtml(formatSeconds(play.trimmedEndSeconds))}
+            </p>
+          </div>
+          ${sceneLinkHtml ? `<div class="asset-actions">${sceneLinkHtml}</div>` : ''}
+        </div>
+        <p class="play-card-summary"><strong>Contacts:</strong> ${escapeHtml(contactedSummary)}</p>
+        ${contactsHtml}
+      </article>`;
+    }).join('');
+  }
+
   function showError(message) {
     detailLoading.classList.add('hidden');
     detailContent.classList.add('hidden');
@@ -312,6 +394,30 @@ document.addEventListener('DOMContentLoaded', () => {
     if (state === 'active') return 'In progress';
     if (state === 'blocked') return 'Failed';
     return 'Pending';
+  }
+
+  function formatActionType(actionType) {
+    return (actionType || 'unknown')
+      .replace(/-/g, ' ')
+      .replace(/\b\w/g, (char) => char.toUpperCase());
+  }
+
+  function formatTeam(teamSide, teamId) {
+    if (teamSide === 'main') return `Main team • Team ${teamId}`;
+    if (teamSide === 'opponent') return `Opponent team • Team ${teamId}`;
+    return `Team ${teamId ?? '—'}`;
+  }
+
+  function formatSeconds(value) {
+    if (typeof value !== 'number' || Number.isNaN(value)) {
+      return '—';
+    }
+
+    return `${value.toFixed(2)}s`;
+  }
+
+  function formatConfidence(value) {
+    return `${Math.round(value * 100)}%`;
   }
 
   function escapeHtml(value) {

@@ -168,6 +168,13 @@ jobs:
         tenant-id: ${{ secrets.AZURE_TENANT_ID }}
         subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+    - name: Configure web app URL import endpoint
+      run: |
+        az webapp config appsettings set \
+          --name ${{ env.AZURE_WEBAPP_NAME }} \
+          --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+          --settings VIDEO_URL_IMPORT_FUNCTION_URL=https://${{ env.AZURE_FUNCTIONAPP_NAME }}.azurewebsites.net/api/videos/import-from-url
+
     - name: Deploy to Azure WebApp
       uses: azure/webapps-deploy@v3
       with:

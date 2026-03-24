@@ -104,6 +104,7 @@ type PlayerManifestRecord = {
   players: Array<{
     trackId: number;
     teamId: number;
+    teamSide?: 'main' | 'opponent';
     frameCount: number;
     avgConfidence: number;
     bestConfidence?: number;
@@ -170,7 +171,18 @@ function formatBytes(bytes: number): string {
 }
 
 function getVideoUrlImportFunctionUrl(): string {
-  return process.env.VIDEO_URL_IMPORT_FUNCTION_URL ?? 'http://127.0.0.1:7071/api/videos/import-from-url';
+  const configuredUrl = process.env.VIDEO_URL_IMPORT_FUNCTION_URL?.trim();
+  if (configuredUrl) {
+    return configuredUrl;
+  }
+
+  const isAzureHosted = Boolean(process.env.WEBSITE_HOSTNAME?.trim());
+  const isProduction = (process.env.NODE_ENV ?? '').trim().toLowerCase() === 'production';
+  if (!isAzureHosted && !isProduction) {
+    return 'http://127.0.0.1:7071/api/videos/import-from-url';
+  }
+
+  throw new Error('VIDEO_URL_IMPORT_FUNCTION_URL is not configured.');
 }
 
 class VideoImportRequestError extends Error {
@@ -224,7 +236,11 @@ async function handleVideoUrlImportRequest(req: Request, res: Response): Promise
       return;
     }
 
-    const errorMessage = handlerError instanceof Error ? handlerError.message : 'Failed to queue video import';
+    const errorMessage = handlerError instanceof Error && handlerError.message === 'VIDEO_URL_IMPORT_FUNCTION_URL is not configured.'
+      ? 'Video URL import is not configured for this environment.'
+      : handlerError instanceof Error
+        ? handlerError.message
+        : 'Failed to queue video import';
     res.status(500).json({ error: errorMessage });
   }
 }
@@ -565,6 +581,18 @@ function buildPlayerManifestResponse(record: VideoStatusRecord, manifest: Player
   };
 }
 
+function normalizePlayerTeamSide(value: unknown): 'main' | 'opponent' | undefined {
+  if (value === 'main' || value === 'opponent') {
+    return value;
+  }
+
+  return undefined;
+}
+
+function getPlayerTeamKey(teamId: number, teamSide?: 'main' | 'opponent'): string {
+  return `${teamId}:${teamSide ?? ''}`;
+}
+
 function buildPlayDescriptionsResponse(record: VideoStatusRecord, manifest: PlayDescriptionsRecord | undefined) {
   if (!manifest) {
     return {
@@ -864,30 +892,71 @@ router.put('/:recordId/players', rateLimit({ windowMs: 60_000, limit: 30, standa
       return;
     }
 
-    const requestedByTrackId = new Map<number, { displayName?: string; notes?: string }>();
+    const knownPlayersByTrackId = new Map(currentManifest.players.map(player => [player.trackId, player]));
+    const allowedTeams = new Set(
+      currentManifest.players.map(player => getPlayerTeamKey(player.teamId, player.teamSide))
+    );
+    const requestedByTrackId = new Map<number, {
+      displayName: string;
+      notes: string;
+      teamId: number;
+      teamSide?: 'main' | 'opponent';
+    }>();
+
     for (const player of requestedPlayers) {
-      if (typeof player?.trackId !== 'number') {
-        continue;
+      if (typeof player?.trackId !== 'number' || !Number.isInteger(player.trackId)) {
+        res.status(400).json({ error: 'Each player update must include an integer trackId.' });
+        return;
+      }
+
+      if (!knownPlayersByTrackId.has(player.trackId)) {
+        res.status(400).json({ error: `Unknown player trackId ${player.trackId}.` });
+        return;
+      }
+
+      if (requestedByTrackId.has(player.trackId)) {
+        res.status(400).json({ error: `Duplicate player trackId ${player.trackId}.` });
+        return;
+      }
+
+      if (typeof player?.teamId !== 'number' || !Number.isInteger(player.teamId)) {
+        res.status(400).json({ error: `Player ${player.trackId} must include an integer teamId.` });
+        return;
+      }
+
+      const teamSide = normalizePlayerTeamSide(player.teamSide);
+      if (player.teamSide !== undefined && teamSide === undefined) {
+        res.status(400).json({ error: `Player ${player.trackId} has an invalid teamSide.` });
+        return;
+      }
+
+      if (!allowedTeams.has(getPlayerTeamKey(player.teamId, teamSide))) {
+        res.status(400).json({ error: `Player ${player.trackId} must use one of the detected teams for this video.` });
+        return;
       }
 
       requestedByTrackId.set(player.trackId, {
         displayName: typeof player.displayName === 'string' ? player.displayName.trim() : '',
         notes: typeof player.notes === 'string' ? player.notes.trim() : '',
+        teamId: player.teamId,
+        teamSide,
       });
     }
 
     const updatedManifest: PlayerManifestRecord = {
       ...currentManifest,
-      generatedAt: currentManifest.generatedAt,
-      players: currentManifest.players.map(player => {
+      generatedAt: new Date().toISOString(),
+      players: currentManifest.players.flatMap(player => {
         const requested = requestedByTrackId.get(player.trackId);
         return requested
-          ? {
+          ? [{
               ...player,
               displayName: requested.displayName ?? '',
               notes: requested.notes ?? '',
-            }
-          : player;
+              teamId: requested.teamId,
+              teamSide: requested.teamSide,
+            }]
+          : [];
       }),
     };
 

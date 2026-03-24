@@ -196,6 +196,8 @@ curl -X POST http://localhost:3000/api/videos/analyze-url \
 `POST /api/videos/import-from-url` queues the URL-based import pipeline for a publicly accessible video file.
 No AI or third-party services are required — only ffmpeg.
 
+The web application must know the Function App URL through `VIDEO_URL_IMPORT_FUNCTION_URL`; deployed environments should set this explicitly rather than relying on the local `127.0.0.1:7071` development fallback.
+
 ### How It Works
 
 1. Frames are sampled from the video at a configurable rate (default 2 fps) and scaled down to 160×90 grayscale pixels.
