@@ -39,3 +39,25 @@ export async function downloadBlobToFile(blob: BlobReference, destinationPath: s
 
   await blobClient.downloadToFile(destinationPath);
 }
+
+async function readStreamAsString(stream: NodeJS.ReadableStream | undefined): Promise<string> {
+  if (!stream) {
+    return '';
+  }
+
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+  }
+
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+export async function downloadBlobAsString(blob: BlobReference): Promise<string> {
+  const blobServiceClient = BlobServiceClient.fromConnectionString(getStorageConnectionString());
+  const blobClient = blobServiceClient
+    .getContainerClient(blob.containerName)
+    .getBlobClient(blob.blobName);
+  const response = await blobClient.download();
+  return readStreamAsString(response.readableStreamBody);
+}

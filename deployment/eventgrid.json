@@ -70,6 +70,37 @@
         },
         "eventDeliverySchema": "EventGridSchema"
       }
+    },
+    {
+      "type": "Microsoft.EventGrid/systemTopics/eventSubscriptions",
+      "apiVersion": "2022-06-15",
+      "name": "[format('{0}/project-processed-manifest-on-processed', variables('eventGridTopicName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.EventGrid/systemTopics', variables('eventGridTopicName'))]"
+      ],
+      "properties": {
+        "destination": {
+          "endpointType": "AzureFunction",
+          "properties": {
+            "resourceId": "[format('{0}/functions/projectProcessedManifestBlob', resourceId('Microsoft.Web/sites', variables('functionAppName')))]",
+            "maxEventsPerBatch": 1,
+            "preferredBatchSizeInKilobytes": 64
+          }
+        },
+        "filter": {
+          "includedEventTypes": [
+            "Microsoft.Storage.BlobCreated",
+            "Microsoft.Storage.BlobRenamed"
+          ],
+          "subjectBeginsWith": "[format('/blobServices/default/containers/{0}/blobs/processed/', parameters('videoBlobContainerName'))]",
+          "subjectEndsWith": "manifest.json"
+        },
+        "retryPolicy": {
+          "maxDeliveryAttempts": 3,
+          "eventTimeToLiveInMinutes": 1440
+        },
+        "eventDeliverySchema": "EventGridSchema"
+      }
     }
   ],
   "outputs": {
@@ -80,6 +111,10 @@
     "queueUploadSubscriptionName": {
       "type": "string",
       "value": "queue-upload-on-input"
+    },
+    "projectProcessedManifestSubscriptionName": {
+      "type": "string",
+      "value": "project-processed-manifest-on-processed"
     }
   }
 }

@@ -84,6 +84,20 @@
         "description": "Azure Queue Storage queue consumed for detect jobs after trimming succeeds."
       }
     },
+    "cosmosDbDatabaseName": {
+      "type": "string",
+      "defaultValue": "readmodel",
+      "metadata": {
+        "description": "Azure Cosmos DB SQL database name for the read model."
+      }
+    },
+    "cosmosDbContainerName": {
+      "type": "string",
+      "defaultValue": "videoprocessingrecords",
+      "metadata": {
+        "description": "Azure Cosmos DB SQL container name for the read model."
+      }
+    },
     "videoUploadMaxBytes": {
       "type": "string",
       "defaultValue": "5368709120",
@@ -105,7 +119,8 @@
     "workerImageName": "[format('{0}acr.azurecr.io/{0}-worker:latest', replace(parameters('projectName'), '-', ''))]",
     "workerBootstrapImageName": "mcr.microsoft.com/k8se/quickstart:latest",
     "containerAppEnvironmentName": "[format('{0}-cae', parameters('projectName'))]",
-    "workerContainerAppName": "[format('{0}-video-worker', parameters('projectName'))]"
+    "workerContainerAppName": "[format('{0}-video-worker', parameters('projectName'))]",
+    "cosmosDbAccountName": "[format('{0}cosmos', replace(toLower(parameters('projectName')), '-', ''))]"
   },
   "resources": [
     {
@@ -285,6 +300,66 @@
       }
     },
     {
+      "type": "Microsoft.DocumentDB/databaseAccounts",
+      "apiVersion": "2023-04-15",
+      "name": "[variables('cosmosDbAccountName')]",
+      "location": "[parameters('location')]",
+      "kind": "GlobalDocumentDB",
+      "properties": {
+        "databaseAccountOfferType": "Standard",
+        "locations": [
+          {
+            "locationName": "[parameters('location')]",
+            "failoverPriority": 0,
+            "isZoneRedundant": false
+          }
+        ],
+        "consistencyPolicy": {
+          "defaultConsistencyLevel": "Session"
+        },
+        "capabilities": [
+          {
+            "name": "EnableServerless"
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases",
+      "apiVersion": "2023-04-15",
+      "name": "[format('{0}/{1}', variables('cosmosDbAccountName'), parameters('cosmosDbDatabaseName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.DocumentDB/databaseAccounts', variables('cosmosDbAccountName'))]"
+      ],
+      "properties": {
+        "resource": {
+          "id": "[parameters('cosmosDbDatabaseName')]"
+        },
+        "options": {}
+      }
+    },
+    {
+      "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers",
+      "apiVersion": "2023-04-15",
+      "name": "[format('{0}/{1}/{2}', variables('cosmosDbAccountName'), parameters('cosmosDbDatabaseName'), parameters('cosmosDbContainerName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlDatabases', variables('cosmosDbAccountName'), parameters('cosmosDbDatabaseName'))]"
+      ],
+      "properties": {
+        "resource": {
+          "id": "[parameters('cosmosDbContainerName')]",
+          "partitionKey": {
+            "paths": [
+              "/recordId"
+            ],
+            "kind": "Hash",
+            "version": 2
+          }
+        },
+        "options": {}
+      }
+    },
+    {
       "type": "Microsoft.App/managedEnvironments",
       "apiVersion": "2024-03-01",
       "name": "[variables('containerAppEnvironmentName')]",
@@ -324,7 +399,8 @@
       "dependsOn": [
         "[resourceId('Microsoft.Web/serverfarms', variables('webAppPlanName'))]",
         "[resourceId('Microsoft.Insights/components', variables('appInsightsName'))]",
-        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]",
+        "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers', variables('cosmosDbAccountName'), parameters('cosmosDbDatabaseName'), parameters('cosmosDbContainerName'))]"
       ],
       "properties": {
         "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('webAppPlanName'))]",
@@ -344,6 +420,22 @@
             {
               "name": "AZURE_STORAGE_CONNECTION_STRING",
               "value": "[format('DefaultEndpointsProtocol=https;AccountName={0};AccountKey={1};EndpointSuffix=core.windows.net', variables('storageAccountName'), listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2023-01-01').keys[0].value)]"
+            },
+            {
+              "name": "COSMOS_DB_ENDPOINT",
+              "value": "[reference(resourceId('Microsoft.DocumentDB/databaseAccounts', variables('cosmosDbAccountName')), '2023-04-15').documentEndpoint]"
+            },
+            {
+              "name": "COSMOS_DB_KEY",
+              "value": "[listKeys(resourceId('Microsoft.DocumentDB/databaseAccounts', variables('cosmosDbAccountName')), '2023-04-15').primaryMasterKey]"
+            },
+            {
+              "name": "COSMOS_DB_DATABASE_NAME",
+              "value": "[parameters('cosmosDbDatabaseName')]"
+            },
+            {
+              "name": "COSMOS_DB_CONTAINER_NAME",
+              "value": "[parameters('cosmosDbContainerName')]"
             },
             {
               "name": "SCM_DO_BUILD_DURING_DEPLOYMENT",
@@ -421,7 +513,8 @@
         "[resourceId('Microsoft.Web/serverfarms', variables('functionAppPlanName'))]",
         "[resourceId('Microsoft.Insights/components', variables('appInsightsName'))]",
         "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]",
-        "[resourceId('Microsoft.ContainerRegistry/registries', variables('acrName'))]"
+        "[resourceId('Microsoft.ContainerRegistry/registries', variables('acrName'))]",
+        "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers', variables('cosmosDbAccountName'), parameters('cosmosDbDatabaseName'), parameters('cosmosDbContainerName'))]"
       ],
       "properties": {
         "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('functionAppPlanName'))]",
@@ -468,6 +561,22 @@
             {
               "name": "AZURE_STORAGE_CONNECTION_STRING",
               "value": "[format('DefaultEndpointsProtocol=https;AccountName={0};AccountKey={1};EndpointSuffix=core.windows.net', variables('storageAccountName'), listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2023-01-01').keys[0].value)]"
+            },
+            {
+              "name": "COSMOS_DB_ENDPOINT",
+              "value": "[reference(resourceId('Microsoft.DocumentDB/databaseAccounts', variables('cosmosDbAccountName')), '2023-04-15').documentEndpoint]"
+            },
+            {
+              "name": "COSMOS_DB_KEY",
+              "value": "[listKeys(resourceId('Microsoft.DocumentDB/databaseAccounts', variables('cosmosDbAccountName')), '2023-04-15').primaryMasterKey]"
+            },
+            {
+              "name": "COSMOS_DB_DATABASE_NAME",
+              "value": "[parameters('cosmosDbDatabaseName')]"
+            },
+            {
+              "name": "COSMOS_DB_CONTAINER_NAME",
+              "value": "[parameters('cosmosDbContainerName')]"
             },
             {
               "name": "VIDEO_BLOB_CONTAINER",
@@ -545,7 +654,8 @@
       "dependsOn": [
         "[resourceId('Microsoft.App/managedEnvironments', variables('containerAppEnvironmentName'))]",
         "[resourceId('Microsoft.ContainerRegistry/registries', variables('acrName'))]",
-        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]",
+        "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers', variables('cosmosDbAccountName'), parameters('cosmosDbDatabaseName'), parameters('cosmosDbContainerName'))]"
       ],
       "properties": {
         "managedEnvironmentId": "[resourceId('Microsoft.App/managedEnvironments', variables('containerAppEnvironmentName'))]",
@@ -559,6 +669,10 @@
             {
               "name": "storage-connection-string",
               "value": "[format('DefaultEndpointsProtocol=https;AccountName={0};AccountKey={1};EndpointSuffix=core.windows.net', variables('storageAccountName'), listKeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2023-01-01').keys[0].value)]"
+            },
+            {
+              "name": "cosmos-db-key",
+              "value": "[listKeys(resourceId('Microsoft.DocumentDB/databaseAccounts', variables('cosmosDbAccountName')), '2023-04-15').primaryMasterKey]"
             }
           ],
           "registries": [
@@ -578,6 +692,22 @@
                 {
                   "name": "AZURE_STORAGE_CONNECTION_STRING",
                   "secretRef": "storage-connection-string"
+                },
+                {
+                  "name": "COSMOS_DB_ENDPOINT",
+                  "value": "[reference(resourceId('Microsoft.DocumentDB/databaseAccounts', variables('cosmosDbAccountName')), '2023-04-15').documentEndpoint]"
+                },
+                {
+                  "name": "COSMOS_DB_KEY",
+                  "secretRef": "cosmos-db-key"
+                },
+                {
+                  "name": "COSMOS_DB_DATABASE_NAME",
+                  "value": "[parameters('cosmosDbDatabaseName')]"
+                },
+                {
+                  "name": "COSMOS_DB_CONTAINER_NAME",
+                  "value": "[parameters('cosmosDbContainerName')]"
                 },
                 {
                   "name": "VIDEO_RECORDS_TABLE_NAME",

@@ -6,6 +6,7 @@ import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
 import videoRoutes from './routes/videoRoutes';
+import { getProjectInfo } from './projectInfo';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -22,6 +23,9 @@ app.use(express.static(path.join(__dirname, '../public')));
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 app.use('/api/videos', videoRoutes);
+app.get('/api/project-info', (req, res) => {
+  res.json(getProjectInfo());
+});
 
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));

@@ -11,6 +11,7 @@
     "test": "echo \"No tests configured for function app\""
   },
   "dependencies": {
+    "@azure/cosmos": "^4.9.2",
     "@azure/data-tables": "^13.3.0",
     "@azure/functions": "^4.0.0",
     "@azure/storage-blob": "^12.31.0",

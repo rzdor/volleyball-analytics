@@ -9,6 +9,14 @@ import {
   StorageSharedKeyCredential,
   generateBlobSASQueryParameters,
 } from '@azure/storage-blob';
+import {
+  getCosmosReadModelStore,
+  PlayerManifestProjection,
+  PlayDescriptionsProjection,
+  PlayOutcomeAnnotation,
+  PlayOutcomeReason,
+  PlayOutcomeWinner,
+} from '../services/cosmosReadModelStore';
 
 const router = Router();
 
@@ -78,6 +86,9 @@ type VideoStatusRecord = {
   playCount?: number;
   detectedPlayerCount?: number;
   errorMessage?: string;
+  playerManifestGeneratedAt?: string;
+  playDescriptionsGeneratedAt?: string;
+  detectionSummary?: DetectionSummary;
 };
 
 type BlobAsset = {
@@ -96,60 +107,50 @@ type DetectionSummary = {
   teamCount: number;
 };
 
-type PlayerManifestRecord = {
-  recordId: string;
-  generatedAt: string;
-  sourceVideoBlobName: string;
-  processedBlobName: string;
-  players: Array<{
-    trackId: number;
-    teamId: number;
-    teamSide?: 'main' | 'opponent';
-    frameCount: number;
-    avgConfidence: number;
-    bestConfidence?: number;
-    sampleTimestamp?: number;
-    imageBlobName?: string;
-    displayName?: string;
-    notes?: string;
-  }>;
+type PlayerManifestRecord = PlayerManifestProjection;
+
+type PlayDescriptionsRecord = PlayDescriptionsProjection;
+
+type TeamSide = 'main' | 'opponent';
+
+type TeamScore = Record<TeamSide, number>;
+
+type PlayerAggregateStats = {
+  totalContacts: number;
+  serves: number;
+  passes: number;
+  sets: number;
+  attacks: number;
+  unknownContacts: number;
+  ralliesInvolved: number;
+  rallyWinsInvolved: number;
+  rallyLossesInvolved: number;
 };
 
-type PlayDescriptionsRecord = {
-  recordId: string;
-  generatedAt: string;
-  sourceVideoBlobName: string;
-  processedBlobName: string;
-  playCount: number;
-  plays: Array<{
-    playIndex: number;
-    sourceStartSeconds: number;
-    sourceEndSeconds: number;
-    trimmedStartSeconds: number;
-    trimmedEndSeconds: number;
-    sceneBlobName: string;
-    sceneBlobUrl?: string;
-    contactedPlayers: Array<{
-      trackId: number;
-      teamId: number;
-      teamSide?: 'main' | 'opponent';
-      firstContactTimestamp: number;
-      contactCount: number;
-    }>;
-    contacts: Array<{
-      playerTrackId: number;
-      teamId: number;
-      teamSide?: 'main' | 'opponent';
-      frameIndex: number;
-      timestamp: number;
-      distanceToBallPx: number;
-      ballConfidence: number;
-      actionType?: 'serve' | 'pass' | 'set' | 'attack' | 'unknown';
-      actionConfidence?: number;
-      actionReason?: string;
-    }>;
-  }>;
+type PlayerManifestPlayer = PlayerManifestRecord['players'][number];
+
+type PlayDescription = PlayDescriptionsRecord['plays'][number];
+
+type PlayerStatsResponseItem = {
+  trackId: number;
+  teamId: number;
+  teamSide?: TeamSide;
+  frameCount?: number;
+  avgConfidence?: number;
+  bestConfidence?: number;
+  sampleTimestamp?: number;
+  imageBlobName?: string;
+  displayName?: string;
+  notes?: string;
+  imageUrl?: string;
+  imageDownloadUrl?: string;
+  stats: PlayerAggregateStats;
 };
+
+type PlayerStatsAccumulator = Omit<PlayerStatsResponseItem, 'imageUrl' | 'imageDownloadUrl'>;
+
+const PLAY_OUTCOME_WINNERS: PlayOutcomeWinner[] = ['main', 'opponent'];
+const PLAY_OUTCOME_REASONS: PlayOutcomeReason[] = ['ace', 'kill', 'block', 'error', 'violation', 'other'];
 
 function getMaxVideoBytes(): number {
   const configured = Number.parseInt(process.env.VIDEO_UPLOAD_MAX_BYTES ?? '', 10);
@@ -390,7 +391,7 @@ async function writeJsonBlob(containerName: string, blobName: string, payload: u
   });
 }
 
-async function getVideoRecord(recordId: string): Promise<VideoStatusRecord | undefined> {
+async function getTableVideoRecord(recordId: string): Promise<VideoStatusRecord | undefined> {
   const tableClient = getTableClient();
 
   try {
@@ -401,6 +402,43 @@ async function getVideoRecord(recordId: string): Promise<VideoStatusRecord | und
     }
     throw error;
   }
+}
+
+async function getVideoRecord(recordId: string): Promise<VideoStatusRecord | undefined> {
+  const readModelStore = getCosmosReadModelStore(console.warn);
+  if (readModelStore) {
+    const projectedRecord = await readModelStore.getVideoRecord(recordId);
+    if (projectedRecord) {
+      return projectedRecord;
+    }
+  }
+
+  return getTableVideoRecord(recordId);
+}
+
+async function listVideoRecords(): Promise<VideoStatusRecord[]> {
+  const readModelStore = getCosmosReadModelStore(console.warn);
+  if (readModelStore) {
+    const projectedRecords = await readModelStore.listVideoRecords();
+    if (projectedRecords.length > 0) {
+      return projectedRecords;
+    }
+  }
+
+  const tableClient = getTableClient();
+  const records: VideoStatusRecord[] = [];
+
+  for await (const entity of tableClient.listEntities<VideoStatusRecord>()) {
+    records.push(entity);
+  }
+
+  records.sort((left, right) => {
+    const leftTime = new Date(left.uploadedAt ?? 0).getTime();
+    const rightTime = new Date(right.uploadedAt ?? 0).getTime();
+    return rightTime - leftTime;
+  });
+
+  return records;
 }
 
 function mapStatusResponse(record: VideoStatusRecord) {
@@ -490,6 +528,10 @@ async function listProcessedAssets(record: VideoStatusRecord): Promise<BlobAsset
 }
 
 async function loadDetectionSummary(record: VideoStatusRecord): Promise<DetectionSummary | undefined> {
+  if (record.detectionSummary) {
+    return record.detectionSummary;
+  }
+
   if (!record.detectionBlobName) {
     return undefined;
   }
@@ -534,6 +576,31 @@ async function loadDetectionSummary(record: VideoStatusRecord): Promise<Detectio
 }
 
 async function loadPlayerManifest(record: VideoStatusRecord): Promise<PlayerManifestRecord | undefined> {
+  const readModelStore = getCosmosReadModelStore(console.warn);
+  if (readModelStore) {
+    const players = await readModelStore.listPlayerRecords(record.recordId);
+    if (players.length > 0 || record.playerManifestGeneratedAt) {
+      return {
+        recordId: record.recordId,
+        generatedAt: record.playerManifestGeneratedAt ?? players[0]?.generatedAt ?? '',
+        sourceVideoBlobName: record.sourceBlobName,
+        processedBlobName: record.processedBlobName ?? '',
+        players: players.map(player => ({
+          trackId: player.trackId,
+          teamId: player.teamId,
+          teamSide: player.teamSide,
+          frameCount: player.frameCount,
+          avgConfidence: player.avgConfidence,
+          bestConfidence: player.bestConfidence,
+          sampleTimestamp: player.sampleTimestamp,
+          imageBlobName: player.imageBlobName,
+          displayName: player.displayName,
+          notes: player.notes,
+        })),
+      };
+    }
+  }
+
   if (!record.playerManifestBlobName) {
     return undefined;
   }
@@ -549,6 +616,31 @@ async function loadPlayerManifest(record: VideoStatusRecord): Promise<PlayerMani
 }
 
 async function loadPlayDescriptions(record: VideoStatusRecord): Promise<PlayDescriptionsRecord | undefined> {
+  const readModelStore = getCosmosReadModelStore(console.warn);
+  if (readModelStore) {
+    const plays = await readModelStore.listPlayRecords(record.recordId);
+    if (plays.length > 0 || record.playDescriptionsGeneratedAt) {
+      return {
+        recordId: record.recordId,
+        generatedAt: record.playDescriptionsGeneratedAt ?? plays[0]?.generatedAt ?? '',
+        sourceVideoBlobName: record.sourceBlobName,
+        processedBlobName: record.processedBlobName ?? '',
+        playCount: typeof record.playCount === 'number' ? record.playCount : plays.length,
+        plays: plays.map(play => ({
+          playIndex: play.playIndex,
+          sourceStartSeconds: play.sourceStartSeconds,
+          sourceEndSeconds: play.sourceEndSeconds,
+          trimmedStartSeconds: play.trimmedStartSeconds,
+          trimmedEndSeconds: play.trimmedEndSeconds,
+          sceneBlobName: play.sceneBlobName,
+          contactedPlayers: play.contactedPlayers,
+          contacts: play.contacts,
+          outcome: play.outcome,
+        })),
+      };
+    }
+  }
+
   if (!record.playDescriptionsBlobName) {
     return undefined;
   }
@@ -563,6 +655,205 @@ async function loadPlayDescriptions(record: VideoStatusRecord): Promise<PlayDesc
   }
 }
 
+function buildPlayerImageUrls(record: VideoStatusRecord, imageBlobName?: string) {
+  return {
+    imageUrl: imageBlobName ? createBlobUrl(record.sourceContainer, imageBlobName) : undefined,
+    imageDownloadUrl: imageBlobName ? createBlobUrl(record.sourceContainer, imageBlobName, true) : undefined,
+  };
+}
+
+function buildPlayerManifestEntryResponse(record: VideoStatusRecord, player: PlayerManifestPlayer) {
+  return {
+    ...player,
+    ...buildPlayerImageUrls(record, player.imageBlobName),
+  };
+}
+
+function createEmptyScore(): TeamScore {
+  return {
+    main: 0,
+    opponent: 0,
+  };
+}
+
+function createEmptyOutcomeReasonCounts(): Record<PlayOutcomeReason, number> {
+  return {
+    ace: 0,
+    kill: 0,
+    block: 0,
+    error: 0,
+    violation: 0,
+    other: 0,
+  };
+}
+
+function createEmptyPlayerStats(): PlayerAggregateStats {
+  return {
+    totalContacts: 0,
+    serves: 0,
+    passes: 0,
+    sets: 0,
+    attacks: 0,
+    unknownContacts: 0,
+    ralliesInvolved: 0,
+    rallyWinsInvolved: 0,
+    rallyLossesInvolved: 0,
+  };
+}
+
+function ensurePlayerStatsAccumulator(
+  playersByTrackId: Map<number, PlayerStatsAccumulator>,
+  player: Omit<PlayerStatsAccumulator, 'stats'>,
+): PlayerStatsAccumulator {
+  const existing = playersByTrackId.get(player.trackId);
+  if (existing) {
+    existing.teamSide = existing.teamSide ?? player.teamSide;
+    existing.frameCount = existing.frameCount ?? player.frameCount;
+    existing.avgConfidence = existing.avgConfidence ?? player.avgConfidence;
+    existing.bestConfidence = existing.bestConfidence ?? player.bestConfidence;
+    existing.sampleTimestamp = existing.sampleTimestamp ?? player.sampleTimestamp;
+    existing.imageBlobName = existing.imageBlobName ?? player.imageBlobName;
+    existing.displayName = existing.displayName ?? player.displayName;
+    existing.notes = existing.notes ?? player.notes;
+    return existing;
+  }
+
+  const created: PlayerStatsAccumulator = {
+    ...player,
+    stats: createEmptyPlayerStats(),
+  };
+  playersByTrackId.set(player.trackId, created);
+  return created;
+}
+
+function buildPlayerStatsResponse(
+  record: VideoStatusRecord,
+  playerManifest: PlayerManifestRecord | undefined,
+  playDescriptions: PlayDescriptionsRecord | undefined,
+) {
+  const playersByTrackId = new Map<number, PlayerStatsAccumulator>();
+
+  for (const player of playerManifest?.players ?? []) {
+    ensurePlayerStatsAccumulator(playersByTrackId, player);
+  }
+
+  for (const play of playDescriptions?.plays ?? []) {
+    const involvedTrackIds = new Set<number>();
+    const observedTeamSides = new Map<number, TeamSide>();
+    const expectedContactCounts = new Map<number, number>();
+    const recordedContactCounts = new Map<number, number>();
+
+    for (const contactedPlayer of play.contactedPlayers) {
+      ensurePlayerStatsAccumulator(playersByTrackId, {
+        trackId: contactedPlayer.trackId,
+        teamId: contactedPlayer.teamId,
+        teamSide: contactedPlayer.teamSide,
+      });
+      involvedTrackIds.add(contactedPlayer.trackId);
+      expectedContactCounts.set(
+        contactedPlayer.trackId,
+        Math.max(expectedContactCounts.get(contactedPlayer.trackId) ?? 0, contactedPlayer.contactCount),
+      );
+      if (contactedPlayer.teamSide) {
+        observedTeamSides.set(contactedPlayer.trackId, contactedPlayer.teamSide);
+      }
+    }
+
+    for (const contact of play.contacts) {
+      const player = ensurePlayerStatsAccumulator(playersByTrackId, {
+        trackId: contact.playerTrackId,
+        teamId: contact.teamId,
+        teamSide: contact.teamSide,
+      });
+      involvedTrackIds.add(contact.playerTrackId);
+      recordedContactCounts.set(contact.playerTrackId, (recordedContactCounts.get(contact.playerTrackId) ?? 0) + 1);
+      if (contact.teamSide) {
+        observedTeamSides.set(contact.playerTrackId, contact.teamSide);
+      }
+
+      player.stats.totalContacts += 1;
+      switch (contact.actionType) {
+        case 'serve':
+          player.stats.serves += 1;
+          break;
+        case 'pass':
+          player.stats.passes += 1;
+          break;
+        case 'set':
+          player.stats.sets += 1;
+          break;
+        case 'attack':
+          player.stats.attacks += 1;
+          break;
+        case 'unknown':
+        default:
+          player.stats.unknownContacts += 1;
+          break;
+      }
+    }
+
+    for (const [trackId, expectedCount] of expectedContactCounts.entries()) {
+      const player = playersByTrackId.get(trackId);
+      if (!player) {
+        continue;
+      }
+
+      const missingContacts = expectedCount - (recordedContactCounts.get(trackId) ?? 0);
+      if (missingContacts > 0) {
+        player.stats.totalContacts += missingContacts;
+        player.stats.unknownContacts += missingContacts;
+      }
+    }
+
+    for (const trackId of involvedTrackIds) {
+      const player = playersByTrackId.get(trackId);
+      if (!player) {
+        continue;
+      }
+
+      player.stats.ralliesInvolved += 1;
+
+      if (!play.outcome) {
+        continue;
+      }
+
+      const teamSide = observedTeamSides.get(trackId) ?? player.teamSide;
+      if (!teamSide) {
+        continue;
+      }
+
+      if (teamSide === play.outcome.winner) {
+        player.stats.rallyWinsInvolved += 1;
+      } else {
+        player.stats.rallyLossesInvolved += 1;
+      }
+    }
+  }
+
+  const players = Array.from(playersByTrackId.values())
+    .sort((left, right) => left.trackId - right.trackId)
+    .map<PlayerStatsResponseItem>(player => ({
+      trackId: player.trackId,
+      teamId: player.teamId,
+      teamSide: player.teamSide,
+      frameCount: player.frameCount,
+      avgConfidence: player.avgConfidence,
+      bestConfidence: player.bestConfidence,
+      sampleTimestamp: player.sampleTimestamp,
+      imageBlobName: player.imageBlobName,
+      displayName: player.displayName,
+      notes: player.notes,
+      ...buildPlayerImageUrls(record, player.imageBlobName),
+      stats: player.stats,
+    }));
+
+  return {
+    generatedAt: playDescriptions?.generatedAt ?? playerManifest?.generatedAt,
+    playerCount: players.length,
+    players,
+  };
+}
+
 function buildPlayerManifestResponse(record: VideoStatusRecord, manifest: PlayerManifestRecord | undefined) {
   if (!manifest) {
     return {
@@ -573,15 +864,11 @@ function buildPlayerManifestResponse(record: VideoStatusRecord, manifest: Player
 
   return {
     generatedAt: manifest.generatedAt,
-    players: manifest.players.map(player => ({
-      ...player,
-      imageUrl: player.imageBlobName ? createBlobUrl(record.sourceContainer, player.imageBlobName) : undefined,
-      imageDownloadUrl: player.imageBlobName ? createBlobUrl(record.sourceContainer, player.imageBlobName, true) : undefined,
-    })),
+    players: manifest.players.map(player => buildPlayerManifestEntryResponse(record, player)),
   };
 }
 
-function normalizePlayerTeamSide(value: unknown): 'main' | 'opponent' | undefined {
+function normalizePlayerTeamSide(value: unknown): TeamSide | undefined {
   if (value === 'main' || value === 'opponent') {
     return value;
   }
@@ -589,27 +876,178 @@ function normalizePlayerTeamSide(value: unknown): 'main' | 'opponent' | undefine
   return undefined;
 }
 
-function getPlayerTeamKey(teamId: number, teamSide?: 'main' | 'opponent'): string {
+function normalizePlayOutcomeWinner(value: unknown): PlayOutcomeWinner | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const normalizedValue = value.trim();
+  return PLAY_OUTCOME_WINNERS.includes(normalizedValue as PlayOutcomeWinner)
+    ? normalizedValue as PlayOutcomeWinner
+    : undefined;
+}
+
+function normalizePlayOutcomeReason(value: unknown): PlayOutcomeReason | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const normalizedValue = value.trim();
+  return PLAY_OUTCOME_REASONS.includes(normalizedValue as PlayOutcomeReason)
+    ? normalizedValue as PlayOutcomeReason
+    : undefined;
+}
+
+function parsePlayIndexParam(value: unknown): number | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const trimmedValue = value.trim();
+  if (!/^\d+$/.test(trimmedValue)) {
+    return undefined;
+  }
+
+  const parsed = Number.parseInt(trimmedValue, 10);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
+}
+
+function parsePlayOutcomeRequest(
+  body: unknown,
+  existingOutcome?: PlayOutcomeAnnotation,
+): { outcome?: PlayOutcomeAnnotation; error?: string } {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return { error: 'Outcome payload is required.' };
+  }
+
+  const payloadSourceCandidate = 'outcome' in body
+    ? (body as { outcome?: unknown }).outcome
+    : body;
+
+  if (typeof payloadSourceCandidate !== 'object' || payloadSourceCandidate === null || Array.isArray(payloadSourceCandidate)) {
+    return { error: 'Outcome payload is required.' };
+  }
+
+  const payload = payloadSourceCandidate as {
+    winner?: unknown;
+    reason?: unknown;
+    notes?: unknown;
+  };
+
+  const winner = normalizePlayOutcomeWinner(payload.winner);
+  if (!winner) {
+    return { error: `winner must be one of: ${PLAY_OUTCOME_WINNERS.join(', ')}.` };
+  }
+
+  const reason = normalizePlayOutcomeReason(payload.reason);
+  if (!reason) {
+    return { error: `reason must be one of: ${PLAY_OUTCOME_REASONS.join(', ')}.` };
+  }
+
+  const notesValue = typeof payload.notes === 'string' ? payload.notes : undefined;
+  if (payload.notes !== undefined && notesValue === undefined) {
+    return { error: 'notes must be a string when provided.' };
+  }
+
+  const timestamp = new Date().toISOString();
+  const normalizedNotes = notesValue === undefined
+    ? existingOutcome?.notes
+    : notesValue.trim() || undefined;
+
+  return {
+    outcome: {
+      winner,
+      reason,
+      ...(normalizedNotes ? { notes: normalizedNotes } : {}),
+      taggedAt: existingOutcome?.taggedAt ?? timestamp,
+      updatedAt: timestamp,
+    },
+  };
+}
+
+function getPlayerTeamKey(teamId: number, teamSide?: TeamSide): string {
   return `${teamId}:${teamSide ?? ''}`;
 }
 
+function buildRunningScoreForPlay(
+  manifest: PlayDescriptionsRecord | undefined,
+  playIndex: number,
+  fallbackOutcome?: PlayOutcomeAnnotation,
+): TeamScore {
+  const runningScore = createEmptyScore();
+  let matchedPlay = false;
+
+  for (const play of manifest?.plays ?? []) {
+    if (play.playIndex > playIndex) {
+      break;
+    }
+
+    const outcome = play.playIndex === playIndex
+      ? fallbackOutcome ?? play.outcome
+      : play.outcome;
+
+    if (outcome) {
+      runningScore[outcome.winner] += 1;
+    }
+
+    if (play.playIndex === playIndex) {
+      matchedPlay = true;
+      break;
+    }
+  }
+
+  if (!matchedPlay && fallbackOutcome) {
+    runningScore[fallbackOutcome.winner] += 1;
+  }
+
+  return runningScore;
+}
+
 function buildPlayDescriptionsResponse(record: VideoStatusRecord, manifest: PlayDescriptionsRecord | undefined) {
+  const scoreSummary = createEmptyScore();
+  const outcomeSummary = {
+    annotatedPlayCount: 0,
+    pendingPlayCount: manifest?.playCount ?? 0,
+    reasonCounts: createEmptyOutcomeReasonCounts(),
+  };
+
   if (!manifest) {
     return {
       generatedAt: undefined,
       playCount: 0,
+      scoreSummary,
+      outcomeSummary,
       plays: [],
     };
   }
 
-  return {
-    generatedAt: manifest.generatedAt,
-    playCount: manifest.playCount,
-    plays: manifest.plays.map(play => ({
+  const plays = manifest.plays.map(play => {
+    if (play.outcome) {
+      scoreSummary[play.outcome.winner] += 1;
+      outcomeSummary.annotatedPlayCount += 1;
+      outcomeSummary.reasonCounts[play.outcome.reason] += 1;
+    }
+
+    return {
       ...play,
       sceneUrl: createBlobUrl(record.sourceContainer, play.sceneBlobName),
       sceneDownloadUrl: createBlobUrl(record.sourceContainer, play.sceneBlobName, true),
-    })),
+      runningScore: {
+        ...scoreSummary,
+      },
+    };
+  });
+
+  outcomeSummary.pendingPlayCount = Math.max(manifest.playCount - outcomeSummary.annotatedPlayCount, 0);
+
+  return {
+    generatedAt: manifest.generatedAt,
+    playCount: manifest.playCount,
+    scoreSummary: {
+      ...scoreSummary,
+    },
+    outcomeSummary,
+    plays,
   };
 }
 
@@ -832,6 +1270,113 @@ router.get('/:recordId/plays', rateLimit({ windowMs: 60_000, limit: 120, standar
   }
 });
 
+router.put('/:recordId/plays/:playIndex/outcome', rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: true, legacyHeaders: false }), async (req: Request, res: Response): Promise<void> => {
+  try {
+    const recordIdParam = req.params.recordId;
+    const recordId = typeof recordIdParam === 'string' ? recordIdParam.trim() : '';
+    if (!recordId) {
+      res.status(400).json({ error: 'recordId is required' });
+      return;
+    }
+
+    const playIndex = parsePlayIndexParam(req.params.playIndex);
+    if (playIndex === undefined) {
+      res.status(400).json({ error: 'playIndex must be a non-negative integer.' });
+      return;
+    }
+
+    const record = await getVideoRecord(recordId);
+    if (!record) {
+      res.status(404).json({ error: 'Video play not found', recordId, playIndex });
+      return;
+    }
+
+    const readModelStore = getCosmosReadModelStore(console.warn);
+    if (!readModelStore) {
+      res.status(503).json({ error: 'Play outcome updates require Cosmos read-model integration.' });
+      return;
+    }
+
+    const existingPlay = await readModelStore.getPlayRecord(recordId, playIndex);
+    if (!existingPlay) {
+      res.status(404).json({ error: `Play ${playIndex} not found for this video.`, recordId, playIndex });
+      return;
+    }
+
+    const { outcome, error } = parsePlayOutcomeRequest(req.body, existingPlay.outcome);
+    if (error || !outcome) {
+      res.status(400).json({ error: error ?? 'Outcome payload is required.' });
+      return;
+    }
+
+    const updatedPlayRecord = await readModelStore.updatePlayOutcome(recordId, playIndex, outcome, existingPlay);
+    if (!updatedPlayRecord) {
+      res.status(404).json({ error: `Play ${playIndex} not found for this video.`, recordId, playIndex });
+      return;
+    }
+
+    const playDescriptions = await loadPlayDescriptions(record);
+    const playDescriptionsResponse = buildPlayDescriptionsResponse(record, playDescriptions);
+    const updatedPlay = playDescriptionsResponse.plays.find(play => play.playIndex === playIndex);
+
+    res.json({
+      success: true,
+      play: updatedPlay ?? {
+        playIndex: updatedPlayRecord.playIndex,
+        sourceStartSeconds: updatedPlayRecord.sourceStartSeconds,
+        sourceEndSeconds: updatedPlayRecord.sourceEndSeconds,
+        trimmedStartSeconds: updatedPlayRecord.trimmedStartSeconds,
+        trimmedEndSeconds: updatedPlayRecord.trimmedEndSeconds,
+        sceneBlobName: updatedPlayRecord.sceneBlobName,
+        contactedPlayers: updatedPlayRecord.contactedPlayers,
+        contacts: updatedPlayRecord.contacts,
+        outcome: updatedPlayRecord.outcome,
+        runningScore: buildRunningScoreForPlay(playDescriptions, updatedPlayRecord.playIndex, updatedPlayRecord.outcome),
+        sceneUrl: createBlobUrl(record.sourceContainer, updatedPlayRecord.sceneBlobName),
+        sceneDownloadUrl: createBlobUrl(record.sourceContainer, updatedPlayRecord.sceneBlobName, true),
+      },
+      scoreSummary: playDescriptionsResponse.scoreSummary,
+      outcomeSummary: playDescriptionsResponse.outcomeSummary,
+    });
+  } catch (error) {
+    console.error('Play outcome update error:', error);
+    res.status(500).json({ error: 'Failed to update play outcome' });
+  }
+});
+
+router.get('/:recordId/stats', rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: true, legacyHeaders: false }), async (req: Request, res: Response): Promise<void> => {
+  try {
+    const recordIdParam = req.params.recordId;
+    const recordId = typeof recordIdParam === 'string' ? recordIdParam.trim() : '';
+    if (!recordId) {
+      res.status(400).json({ error: 'recordId is required' });
+      return;
+    }
+
+    const record = await getVideoRecord(recordId);
+    if (!record) {
+      res.status(404).json({ error: 'Video stats not found', recordId });
+      return;
+    }
+
+    const playerManifest = await loadPlayerManifest(record);
+    const playDescriptions = await loadPlayDescriptions(record);
+    const playDescriptionsResponse = buildPlayDescriptionsResponse(record, playDescriptions);
+
+    res.json({
+      ...mapStatusResponse(record),
+      playersPageUrl: `/videos/${encodeURIComponent(record.recordId)}/players`,
+      videoDetailsUrl: `/videos/${encodeURIComponent(record.recordId)}`,
+      playerStats: buildPlayerStatsResponse(record, playerManifest, playDescriptions),
+      scoreSummary: playDescriptionsResponse.scoreSummary,
+      outcomeSummary: playDescriptionsResponse.outcomeSummary,
+    });
+  } catch (error) {
+    console.error('Player stats error:', error);
+    res.status(500).json({ error: 'Failed to load player stats' });
+  }
+});
+
 router.get('/:recordId/players', rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: true, legacyHeaders: false }), async (req: Request, res: Response): Promise<void> => {
   try {
     const recordIdParam = req.params.recordId;
@@ -961,6 +1506,7 @@ router.put('/:recordId/players', rateLimit({ windowMs: 60_000, limit: 30, standa
     };
 
     await writeJsonBlob(record.sourceContainer, record.playerManifestBlobName, updatedManifest);
+    await getCosmosReadModelStore(console.warn)?.replacePlayerManifest(updatedManifest);
 
     res.json({
       success: true,
@@ -974,18 +1520,7 @@ router.put('/:recordId/players', rateLimit({ windowMs: 60_000, limit: 30, standa
 
 router.get('/list', async (_req: Request, res: Response): Promise<void> => {
   try {
-    const tableClient = getTableClient();
-    const records: VideoStatusRecord[] = [];
-
-    for await (const entity of tableClient.listEntities<VideoStatusRecord>()) {
-      records.push(entity);
-    }
-
-    records.sort((left, right) => {
-      const leftTime = new Date(left.uploadedAt ?? 0).getTime();
-      const rightTime = new Date(right.uploadedAt ?? 0).getTime();
-      return rightTime - leftTime;
-    });
+    const records = await listVideoRecords();
 
     const uploads = records.map(record => ({
       name: record.sourceBlobName.replace(/^input\//, ''),

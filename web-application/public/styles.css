@@ -548,6 +548,48 @@ footer {
   color: #666;
 }
 
+.project-footer {
+  display: grid;
+  gap: 1rem;
+}
+
+.project-footer-copy {
+  margin: 0;
+}
+
+.project-info-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  max-width: 720px;
+  margin: 0 auto;
+  text-align: left;
+}
+
+.project-info-item {
+  padding: 0.9rem 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.project-info-label {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: #9fa6b2;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.project-info-value {
+  display: block;
+  color: #f5f5f5;
+  font-weight: 600;
+  word-break: break-word;
+}
+
 .actions {
   display: flex;
   justify-content: center;
@@ -721,6 +763,24 @@ footer {
   color: #8ff0b2;
 }
 
+#playerStatsSummary {
+  margin-bottom: 1rem;
+  color: #d8d8d8;
+}
+
+.player-card .status-facts {
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  margin-top: 1rem;
+}
+
+.player-card .status-fact {
+  padding: 0.75rem;
+}
+
+.outcome-reason-facts {
+  margin-top: 0.75rem;
+}
+
 .play-actions {
   display: grid;
   gap: 1rem;
@@ -745,10 +805,134 @@ footer {
   color: #fff;
 }
 
+.play-card-badges {
+  display: grid;
+  gap: 0.5rem;
+  justify-items: end;
+}
+
+.play-card-badges .asset-actions {
+  justify-content: flex-end;
+}
+
 .play-card-meta,
 .play-card-summary {
   margin-top: 0.5rem;
   color: #bdbdbd;
+}
+
+.play-score-badge,
+.play-outcome-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 0.35rem 0.8rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.play-score-badge {
+  background: rgba(52, 152, 219, 0.18);
+  color: #9dd6ff;
+}
+
+.play-outcome-badge-pending {
+  background: rgba(255, 255, 255, 0.12);
+  color: #dddddd;
+}
+
+.play-outcome-badge-main {
+  background: rgba(46, 204, 113, 0.18);
+  color: #8ff0b2;
+}
+
+.play-outcome-badge-opponent {
+  background: rgba(231, 76, 60, 0.18);
+  color: #ffb3ab;
+}
+
+.play-outcome-panel {
+  margin-top: 1rem;
+  padding: 1rem;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.play-outcome-current {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.play-outcome-current-label {
+  color: #9fa6b2;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.play-outcome-current-value {
+  margin-top: 0.35rem;
+  color: #fff;
+  font-weight: 600;
+}
+
+.play-outcome-running-score {
+  color: #ffd089;
+  font-weight: 600;
+}
+
+.play-outcome-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.play-outcome-control {
+  margin-top: 0;
+}
+
+.play-outcome-buttons {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 0.75rem;
+}
+
+.play-outcome-buttons .btn-secondary {
+  width: auto;
+  margin-top: 0;
+  padding: 0.75rem 1rem;
+}
+
+.play-outcome-button-active {
+  background: rgba(243, 156, 18, 0.12);
+  border-color: #f39c12;
+  color: #fff;
+}
+
+.play-outcome-help,
+.play-outcome-message {
+  margin-top: 0.75rem;
+  font-size: 0.92rem;
+}
+
+.play-outcome-help {
+  color: #bdbdbd;
+}
+
+.play-outcome-message-success {
+  color: #8ff0b2;
+}
+
+.play-outcome-message-error {
+  color: #ffb3ab;
 }
 
 .play-action-list {
@@ -870,7 +1054,23 @@ footer {
     flex-direction: column;
   }
 
+  .play-card-badges {
+    justify-items: start;
+  }
+
   .play-action-badges {
     justify-content: flex-start;
+  }
+
+  .play-outcome-current {
+    flex-direction: column;
+  }
+
+  .play-outcome-buttons {
+    flex-direction: column;
+  }
+
+  .play-outcome-buttons .btn-secondary {
+    width: 100%;
   }
 }

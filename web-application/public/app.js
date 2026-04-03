@@ -26,12 +26,16 @@ document.addEventListener('DOMContentLoaded', () => {
   const uploadedList = document.getElementById('uploadedList');
   const processedList = document.getElementById('processedList');
   const refreshLibraryBtn = document.getElementById('refreshLibrary');
+  const projectVersion = document.getElementById('projectVersion');
+  const projectLastBuild = document.getElementById('projectLastBuild');
+  const projectBuildDetails = document.getElementById('projectBuildDetails');
   let activeRecordId = null;
   let statusPollTimeout = null;
   let maxUploadBytes = null;
   let maxUploadSizeLabel = '5 GB';
 
   updateSubmitState();
+  fetchProjectInfo();
   fetchUploadConfig();
   fetchExistingVideos();
 
@@ -146,6 +150,57 @@ document.addEventListener('DOMContentLoaded', () => {
     const hasFile = videoInput.files && videoInput.files.length > 0;
     const urlProvided = isValidUrl(videoUrlInput.value.trim());
     trimBtn.disabled = !(hasFile || urlProvided);
+  }
+
+  async function fetchProjectInfo() {
+    if (!projectVersion || !projectLastBuild || !projectBuildDetails) {
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/project-info');
+      if (!response.ok) {
+        throw new Error('Failed to load project info');
+      }
+
+      const projectInfo = await response.json();
+      renderProjectInfo(projectInfo);
+    } catch (error) {
+      console.error('Unable to fetch project info', error);
+      projectVersion.textContent = 'Unavailable';
+      projectLastBuild.textContent = 'Unavailable';
+      projectBuildDetails.textContent = 'Unavailable';
+    }
+  }
+
+  function renderProjectInfo(projectInfo) {
+    if (!projectVersion || !projectLastBuild || !projectBuildDetails) {
+      return;
+    }
+
+    const version = typeof projectInfo.version === 'string' && projectInfo.version.trim()
+      ? projectInfo.version.trim()
+      : 'Unavailable';
+    const lastBuild = typeof projectInfo.lastBuildAt === 'string' && projectInfo.lastBuildAt.trim()
+      ? formatDateTime(projectInfo.lastBuildAt)
+      : 'Unavailable in local development';
+    const buildDetails = [];
+
+    if (typeof projectInfo.buildCommitShortSha === 'string' && projectInfo.buildCommitShortSha.trim()) {
+      buildDetails.push(projectInfo.buildCommitShortSha.trim());
+    }
+    if (typeof projectInfo.buildRefName === 'string' && projectInfo.buildRefName.trim()) {
+      buildDetails.push(projectInfo.buildRefName.trim());
+    }
+    if (typeof projectInfo.buildRunNumber === 'string' && projectInfo.buildRunNumber.trim()) {
+      buildDetails.push(`run #${projectInfo.buildRunNumber.trim()}`);
+    }
+
+    projectVersion.textContent = version;
+    projectLastBuild.textContent = lastBuild;
+    projectBuildDetails.textContent = buildDetails.length > 0
+      ? buildDetails.join(' / ')
+      : 'Unavailable in local development';
   }
 
   // Upload form submission

@@ -32,6 +32,12 @@
     "detectQueueName": {
       "value": "video-detect-jobs"
     },
+    "cosmosDbDatabaseName": {
+      "value": "readmodel"
+    },
+    "cosmosDbContainerName": {
+      "value": "videoprocessingrecords"
+    },
     "videoUploadMaxBytes": {
       "value": "5368709120"
     }

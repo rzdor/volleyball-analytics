@@ -11,8 +11,25 @@ document.addEventListener('DOMContentLoaded', () => {
   const assetLinks = document.getElementById('assetLinks');
   const sceneList = document.getElementById('sceneList');
   const detectionFacts = document.getElementById('detectionFacts');
+  const outcomeScoreFacts = document.getElementById('outcomeScoreFacts');
+  const outcomeReasonFacts = document.getElementById('outcomeReasonFacts');
   const playActions = document.getElementById('playActions');
   const detailPreview = document.getElementById('detailPreview');
+
+  const state = {
+    details: undefined,
+    savingPlayIndex: undefined,
+    playSaveMessage: undefined,
+  };
+
+  const PLAY_OUTCOME_REASON_OPTIONS = [
+    { value: 'ace', label: 'Ace' },
+    { value: 'kill', label: 'Kill' },
+    { value: 'block', label: 'Block' },
+    { value: 'error', label: 'Error' },
+    { value: 'violation', label: 'Violation' },
+    { value: 'other', label: 'Other' },
+  ];
 
   const recordId = decodeURIComponent(window.location.pathname.split('/').pop() || '').trim();
 
@@ -20,6 +37,8 @@ document.addEventListener('DOMContentLoaded', () => {
     showError('Missing record ID in the page URL.');
     return;
   }
+
+  playActions?.addEventListener('click', handlePlayActionClick);
 
   loadDetails(recordId);
 
@@ -31,10 +50,12 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       const details = await response.json();
+      state.details = details;
+      state.savingPlayIndex = undefined;
       renderDetails(details);
     } catch (error) {
       console.error('Video details error:', error);
-      showError(error.message || 'Failed to load video details.');
+      showError(error instanceof Error ? error.message : 'Failed to load video details.');
     }
   }
 
@@ -96,6 +117,7 @@ document.addEventListener('DOMContentLoaded', () => {
     renderAssets(details);
     renderScenes(details.splitParts || []);
     renderDetection(details.detectionSummary, details.detectionFile);
+    renderOutcomeSummary(details.playDescriptions);
     renderPlayActions(details.playDescriptions, details.playerManifest);
 
     if (details.trimmedVideo && details.trimmedVideo.url) {
@@ -108,8 +130,12 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function renderFacts(container, items) {
+    if (!container) {
+      return;
+    }
+
     container.innerHTML = items.map(([label, value]) => {
-      return `<div class="status-fact"><span class="status-fact-label">${escapeHtml(label)}</span><span class="status-fact-value">${escapeHtml(value || '—')}</span></div>`;
+      return `<div class="status-fact"><span class="status-fact-label">${escapeHtml(label)}</span><span class="status-fact-value">${escapeHtml(formatFactValue(value))}</span></div>`;
     }).join('');
   }
 
@@ -218,6 +244,32 @@ document.addEventListener('DOMContentLoaded', () => {
     ]);
   }
 
+  function renderOutcomeSummary(playDescriptions) {
+    const scoreSummary = playDescriptions?.scoreSummary || { main: 0, opponent: 0 };
+    const outcomeSummary = playDescriptions?.outcomeSummary || {
+      annotatedPlayCount: 0,
+      pendingPlayCount: 0,
+      reasonCounts: {},
+    };
+    const reasonCounts = outcomeSummary.reasonCounts || {};
+
+    renderFacts(outcomeScoreFacts, [
+      ['Main team points', String(toCount(scoreSummary.main))],
+      ['Opponent points', String(toCount(scoreSummary.opponent))],
+      ['Tagged rallies', String(toCount(outcomeSummary.annotatedPlayCount))],
+      ['Pending tags', String(toCount(outcomeSummary.pendingPlayCount))],
+    ]);
+
+    renderFacts(outcomeReasonFacts, [
+      ['Kills', String(toCount(reasonCounts.kill))],
+      ['Aces', String(toCount(reasonCounts.ace))],
+      ['Blocks', String(toCount(reasonCounts.block))],
+      ['Errors', String(toCount(reasonCounts.error))],
+      ['Violations', String(toCount(reasonCounts.violation))],
+      ['Other', String(toCount(reasonCounts.other))],
+    ]);
+  }
+
   function renderPlayActions(playDescriptions, playerManifest) {
     if (!playActions) {
       return;
@@ -247,6 +299,18 @@ document.addEventListener('DOMContentLoaded', () => {
             return `${name} (${player.contactCount})`;
           }).join(', ')
         : 'No confirmed contacts';
+      const outcome = play?.outcome && typeof play.outcome === 'object' ? play.outcome : undefined;
+      const runningScore = play?.runningScore && typeof play.runningScore === 'object'
+        ? play.runningScore
+        : { main: 0, opponent: 0 };
+      const selectedReason = PLAY_OUTCOME_REASON_OPTIONS.some((option) => option.value === outcome?.reason)
+        ? outcome.reason
+        : 'other';
+      const isSaving = state.savingPlayIndex === play.playIndex;
+      const saveMessage = state.playSaveMessage?.playIndex === play.playIndex ? state.playSaveMessage : undefined;
+      const reasonOptionsHtml = PLAY_OUTCOME_REASON_OPTIONS.map((option) => {
+        return `<option value="${escapeAttribute(option.value)}"${option.value === selectedReason ? ' selected' : ''}>${escapeHtml(option.label)}</option>`;
+      }).join('');
 
       const contactsHtml = contacts.length
         ? `<div class="play-action-list">${contacts.map((contact, index) => {
@@ -280,22 +344,152 @@ document.addEventListener('DOMContentLoaded', () => {
       const sceneLinkHtml = play.sceneUrl
         ? `<a href="${escapeAttribute(play.sceneUrl)}" target="_blank" rel="noopener noreferrer">Open scene clip</a>`
         : '';
+      const playNumber = typeof play.playIndex === 'number' ? String(play.playIndex) : '—';
+      const outcomeBadgeClass = !outcome
+        ? 'play-outcome-badge-pending'
+        : outcome.winner === 'main'
+          ? 'play-outcome-badge-main'
+          : 'play-outcome-badge-opponent';
+      const winnerButtonsHtml = ['main', 'opponent'].map((winner) => {
+        const isActive = outcome?.winner === winner;
+        const winnerLabel = winner === 'main' ? 'Main team point' : 'Opponent point';
+        return `<button type="button" class="btn-secondary play-outcome-button${isActive ? ' play-outcome-button-active' : ''}" data-play-index="${escapeAttribute(playNumber)}" data-winner="${winner}"${isSaving ? ' disabled' : ''}>${escapeHtml(winnerLabel)}</button>`;
+      }).join('');
+      const helperText = isSaving
+        ? 'Saving rally tag...'
+        : outcome?.updatedAt
+          ? `Last updated ${formatDateTime(outcome.updatedAt)}`
+          : 'Choose a reason, then tag the rally winner.';
+      const saveMessageHtml = saveMessage
+        ? `<p class="play-outcome-message ${saveMessage.isError ? 'play-outcome-message-error' : 'play-outcome-message-success'}">${escapeHtml(saveMessage.text)}</p>`
+        : '';
 
-      return `<article class="play-card">
+      return `<article class="play-card" data-play-index="${escapeAttribute(playNumber)}">
         <div class="play-card-header">
           <div>
-            <h4>Play ${escapeHtml(String((play.playIndex ?? 0) + 1))}</h4>
+            <h4>Rally ${escapeHtml(playNumber)}</h4>
             <p class="play-card-meta">
               Source ${escapeHtml(formatSeconds(play.sourceStartSeconds))} - ${escapeHtml(formatSeconds(play.sourceEndSeconds))}
               • Trimmed ${escapeHtml(formatSeconds(play.trimmedStartSeconds))} - ${escapeHtml(formatSeconds(play.trimmedEndSeconds))}
             </p>
           </div>
-          ${sceneLinkHtml ? `<div class="asset-actions">${sceneLinkHtml}</div>` : ''}
+          <div class="play-card-badges">
+            <span class="play-score-badge">Score ${escapeHtml(formatTeamScore(runningScore))}</span>
+            <span class="play-outcome-badge ${outcomeBadgeClass}">${escapeHtml(outcome ? formatOutcomeLabel(outcome) : 'Pending tag')}</span>
+            ${sceneLinkHtml ? `<div class="asset-actions">${sceneLinkHtml}</div>` : ''}
+          </div>
         </div>
         <p class="play-card-summary"><strong>Contacts:</strong> ${escapeHtml(contactedSummary)}</p>
+        <div class="play-outcome-panel">
+          <div class="play-outcome-current">
+            <div>
+              <div class="play-outcome-current-label">Tagged outcome</div>
+              <div class="play-outcome-current-value">${escapeHtml(outcome ? formatOutcomeLabel(outcome) : 'Waiting for coach review')}</div>
+            </div>
+            <div class="play-outcome-running-score">Running score <strong>${escapeHtml(formatTeamScore(runningScore))}</strong></div>
+          </div>
+          <div class="play-outcome-controls">
+            <label class="form-group play-outcome-control">
+              <span>Reason</span>
+              <select class="text-input play-outcome-reason-select"${isSaving ? ' disabled' : ''}>
+                ${reasonOptionsHtml}
+              </select>
+            </label>
+            <label class="form-group play-outcome-control">
+              <span>Notes</span>
+              <input class="text-input play-outcome-notes-input" type="text" value="${escapeAttribute(outcome?.notes || '')}" placeholder="Optional coaching note"${isSaving ? ' disabled' : ''}>
+            </label>
+          </div>
+          <div class="play-outcome-buttons">
+            ${winnerButtonsHtml}
+          </div>
+          <p class="play-outcome-help">${escapeHtml(helperText)}</p>
+          ${saveMessageHtml}
+        </div>
         ${contactsHtml}
       </article>`;
     }).join('');
+  }
+
+  async function handlePlayActionClick(event) {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+
+    const outcomeButton = target.closest('.play-outcome-button');
+    if (!(outcomeButton instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    const playCard = outcomeButton.closest('.play-card');
+    if (!(playCard instanceof HTMLElement)) {
+      return;
+    }
+
+    const playIndex = Number(playCard.getAttribute('data-play-index'));
+    if (!Number.isInteger(playIndex) || playIndex < 0) {
+      return;
+    }
+
+    const winner = outcomeButton.getAttribute('data-winner');
+    if (winner !== 'main' && winner !== 'opponent') {
+      return;
+    }
+
+    const reasonSelect = playCard.querySelector('.play-outcome-reason-select');
+    const notesInput = playCard.querySelector('.play-outcome-notes-input');
+    const reason = reasonSelect instanceof HTMLSelectElement ? reasonSelect.value : 'other';
+    const notes = notesInput instanceof HTMLInputElement ? notesInput.value : '';
+
+    await savePlayOutcome(playIndex, winner, reason, notes);
+  }
+
+  async function savePlayOutcome(playIndex, winner, reason, notes) {
+    if (!state.details) {
+      return;
+    }
+
+    state.savingPlayIndex = playIndex;
+    state.playSaveMessage = undefined;
+    renderPlayActions(state.details.playDescriptions, state.details.playerManifest);
+
+    try {
+      const response = await fetch(`/api/videos/${encodeURIComponent(recordId)}/plays/${encodeURIComponent(String(playIndex))}/outcome`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          outcome: {
+            winner,
+            reason,
+            notes,
+          },
+        }),
+      });
+
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || 'Failed to save rally outcome.');
+      }
+
+      state.playSaveMessage = {
+        playIndex,
+        text: 'Rally outcome saved.',
+        isError: false,
+      };
+      await loadDetails(recordId);
+    } catch (error) {
+      console.error('Save play outcome error:', error);
+      state.savingPlayIndex = undefined;
+      state.playSaveMessage = {
+        playIndex,
+        text: error instanceof Error ? error.message : 'Failed to save rally outcome.',
+        isError: true,
+      };
+      renderPlayActions(state.details.playDescriptions, state.details.playerManifest);
+    }
   }
 
   function showError(message) {
@@ -389,15 +583,26 @@ document.addEventListener('DOMContentLoaded', () => {
     return (stage || 'unknown').replace(/-/g, ' ');
   }
 
-  function formatStageState(state) {
-    if (state === 'done') return 'Done';
-    if (state === 'active') return 'In progress';
-    if (state === 'blocked') return 'Failed';
+  function formatStageState(stateValue) {
+    if (stateValue === 'done') return 'Done';
+    if (stateValue === 'active') return 'In progress';
+    if (stateValue === 'blocked') return 'Failed';
     return 'Pending';
   }
 
   function formatActionType(actionType) {
     return (actionType || 'unknown')
+      .replace(/-/g, ' ')
+      .replace(/\b\w/g, (char) => char.toUpperCase());
+  }
+
+  function formatOutcomeLabel(outcome) {
+    const winnerLabel = outcome?.winner === 'main' ? 'Main team point' : 'Opponent point';
+    return `${winnerLabel} • ${formatOutcomeReason(outcome?.reason)}`;
+  }
+
+  function formatOutcomeReason(reason) {
+    return (reason || 'other')
       .replace(/-/g, ' ')
       .replace(/\b\w/g, (char) => char.toUpperCase());
   }
@@ -418,6 +623,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function formatConfidence(value) {
     return `${Math.round(value * 100)}%`;
+  }
+
+  function formatTeamScore(score) {
+    return `${toCount(score?.main)} - ${toCount(score?.opponent)}`;
+  }
+
+  function formatFactValue(value) {
+    return value === undefined || value === null || value === '' ? '—' : String(value);
+  }
+
+  function toCount(value) {
+    return typeof value === 'number' && Number.isFinite(value)
+      ? Math.max(0, Math.round(value))
+      : 0;
   }
 
   function escapeHtml(value) {

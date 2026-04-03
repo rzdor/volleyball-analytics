@@ -3,7 +3,8 @@ import os from 'os';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { DequeuedMessageItem } from '@azure/storage-queue';
-import { detectPlayers } from './services/playerDetector';
+import { getCosmosReadModelStore } from './services/cosmosReadModelStore';
+import { DetectionResult, detectPlayers } from './services/playerDetector';
 import { downloadBlobToFile } from './services/blobUtils';
 import { inferPlayerBallContacts } from './services/contactDetector';
 import { getVideoMetadata } from './services/frameExtractor';
@@ -20,6 +21,7 @@ const convertQueue = getProcessingQueue('convert');
 const trimQueue = getProcessingQueue('trim');
 const detectQueue = getProcessingQueue('detect');
 const recordStore = getVideoRecordStore();
+const readModelStore = getCosmosReadModelStore();
 const storage = createVideoStorage({
   baseDir: path.join(os.tmpdir(), 'va-processing-worker'),
   inputFolder: process.env.AZURE_STORAGE_INPUT_FOLDER ?? 'input',
@@ -75,6 +77,21 @@ function getRetryCount(message: DequeuedMessageItem): number {
 
 function isRedelivery(message: DequeuedMessageItem): boolean {
   return getRetryCount(message) > 0;
+}
+
+function buildDetectionSummary(result: DetectionResult) {
+  let peakPlayersInFrame = 0;
+
+  for (const frame of result.frames) {
+    peakPlayersInFrame = Math.max(peakPlayersInFrame, frame.players.length);
+  }
+
+  return {
+    playerCount: result.tracks.length,
+    peakPlayersInFrame,
+    sampledFrames: result.sampledFrames,
+    teamCount: result.teams.length,
+  };
 }
 
 function getStageJobToken(jobType: ProcessingJobMessage['jobType'], record: Awaited<ReturnType<typeof recordStore.get>>): string | undefined {
@@ -294,6 +311,12 @@ async function runDetectJob(job: ProcessingJobMessage, retryCount: number): Prom
       storedPlayManifest.url,
       playDescriptions.playCount
     );
+    await readModelStore?.mergeVideoRecord(job.recordId, {
+      detectionSummary: buildDetectionSummary(result),
+      playerManifestGeneratedAt: playerManifestResult.manifest.generatedAt,
+      playDescriptionsGeneratedAt: playDescriptions.generatedAt,
+      updatedAt: new Date().toISOString(),
+    });
 
     console.log('[worker] Detect job completed', {
       recordId: job.recordId,

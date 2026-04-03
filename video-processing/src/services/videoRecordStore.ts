@@ -1,4 +1,5 @@
 import { TableClient } from '@azure/data-tables';
+import { getCosmosReadModelStore } from './cosmosReadModelStore';
 import {
   createUploadedVideoEntity,
   ProcessingJobType,
@@ -36,6 +37,7 @@ function toDurationMs(startedAt: string, completedAt: string): number {
 export class VideoRecordStore {
   private readonly client: TableClient;
   private readonly tableReady: Promise<void>;
+  private readonly readModelStore = getCosmosReadModelStore();
 
   constructor() {
     this.client = TableClient.fromConnectionString(getStorageConnectionString(), getTableName());
@@ -53,6 +55,7 @@ export class VideoRecordStore {
 
     try {
       await this.client.createEntity(entity);
+      await this.readModelStore?.mergeVideoRecord(entity.recordId, entity);
       return { created: true, record: entity };
     } catch (error) {
       if (getStatusCode(error) !== 409) {
@@ -64,6 +67,7 @@ export class VideoRecordStore {
         throw error;
       }
 
+      await this.readModelStore?.mergeVideoRecord(record.recordId, record);
       return { created: false, record };
     }
   }
@@ -74,6 +78,7 @@ export class VideoRecordStore {
 
     try {
       await this.client.createEntity(entity);
+      await this.readModelStore?.mergeVideoRecord(entity.recordId, entity);
       return { created: true, record: entity };
     } catch (error) {
       if (getStatusCode(error) !== 409) {
@@ -85,6 +90,7 @@ export class VideoRecordStore {
         throw error;
       }
 
+      await this.readModelStore?.mergeVideoRecord(record.recordId, record);
       return { created: false, record };
     }
   }
@@ -104,12 +110,14 @@ export class VideoRecordStore {
 
   async update(recordId: string, updates: Partial<VideoRecordEntity>): Promise<void> {
     await this.tableReady;
-    await this.client.updateEntity({
+    const entity = {
       partitionKey: VIDEO_RECORD_PARTITION_KEY,
       rowKey: recordId,
       updatedAt: new Date().toISOString(),
       ...updates,
-    }, 'Merge');
+    };
+    await this.client.updateEntity(entity, 'Merge');
+    await this.readModelStore?.mergeVideoRecord(recordId, entity);
   }
 
   async markQueued(recordId: string, jobType: ProcessingJobType, retryCount = 0, jobToken?: string): Promise<string> {
