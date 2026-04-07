@@ -11,6 +11,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const assetLinks = document.getElementById('assetLinks');
   const sceneList = document.getElementById('sceneList');
   const detectionFacts = document.getElementById('detectionFacts');
+  const rallyFacts = document.getElementById('rallyFacts');
+  const rallyLinks = document.getElementById('rallyLinks');
   const outcomeScoreFacts = document.getElementById('outcomeScoreFacts');
   const outcomeReasonFacts = document.getElementById('outcomeReasonFacts');
   const playActions = document.getElementById('playActions');
@@ -116,7 +118,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     renderAssets(details);
     renderScenes(details.splitParts || []);
-    renderDetection(details.detectionSummary, details.detectionFile);
+    renderDetection(details.detectionSummary, details.detectionFile, details.playerManifest);
+    renderRallySummary(details.playDescriptions);
     renderOutcomeSummary(details.playDescriptions);
     renderPlayActions(details.playDescriptions, details.playerManifest);
 
@@ -228,20 +231,81 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function renderDetection(summary, detectionFile) {
+  function renderDetection(summary, detectionFile, playerManifest) {
+    const manifestPlayers = Array.isArray(playerManifest?.players) ? playerManifest.players : [];
+    const hasEditablePlayerList = manifestPlayers.length > 0 || Boolean(playerManifest?.generatedAt);
+    const playerCountLabel = hasEditablePlayerList ? 'Players in list' : 'Players found';
+
     if (!summary) {
       renderFacts(detectionFacts, [
-        ['Players found', detectionFile ? 'Detection file exists but summary is not available.' : 'Detection is not ready yet.'],
+        [playerCountLabel, hasEditablePlayerList
+          ? String(manifestPlayers.length)
+          : (detectionFile ? 'Detection file exists but summary is not available.' : 'Detection is not ready yet.')],
       ]);
       return;
     }
 
     renderFacts(detectionFacts, [
-      ['Players found', String(summary.playerCount)],
+      [playerCountLabel, String(hasEditablePlayerList ? manifestPlayers.length : summary.playerCount)],
       ['Peak players in frame', String(summary.peakPlayersInFrame)],
       ['Teams detected', String(summary.teamCount)],
       ['Sampled frames', String(summary.sampledFrames)],
     ]);
+  }
+
+  function renderRallySummary(playDescriptions) {
+    if (!rallyFacts || !rallyLinks) {
+      return;
+    }
+
+    const plays = Array.isArray(playDescriptions?.plays) ? playDescriptions.plays : [];
+    const detectedRallies = typeof playDescriptions?.playCount === 'number' ? playDescriptions.playCount : plays.length;
+    const linkedRallies = plays.filter((play) => typeof play?.playIndex === 'number').length;
+    const clipCount = plays.filter((play) => typeof play?.sceneUrl === 'string' && play.sceneUrl).length;
+
+    renderFacts(rallyFacts, [
+      ['Detected rallies', String(detectedRallies)],
+      ['Linked rallies', String(linkedRallies)],
+      ['Scene clips available', String(clipCount)],
+      ['Generated', formatDateTime(playDescriptions?.generatedAt)],
+    ]);
+
+    if (!plays.length) {
+      rallyLinks.innerHTML = '<p class="detail-empty">Rally clips are not available yet.</p>';
+      return;
+    }
+
+    rallyLinks.innerHTML = plays.map((play) => {
+      const rallyNumber = typeof play?.playIndex === 'number' ? play.playIndex + 1 : undefined;
+      const rallyLabel = rallyNumber ? `Rally ${rallyNumber}` : 'Rally';
+      const reviewLink = rallyNumber
+        ? `<a href="#rally-${encodeURIComponent(String(rallyNumber))}">Review</a>`
+        : '';
+      const clipLink = typeof play?.sceneUrl === 'string' && play.sceneUrl
+        ? `<a href="${escapeAttribute(play.sceneUrl)}" target="_blank" rel="noopener noreferrer">Open clip</a>`
+        : '';
+      const downloadLink = typeof play?.sceneDownloadUrl === 'string' && play.sceneDownloadUrl
+        ? `<a href="${escapeAttribute(play.sceneDownloadUrl)}" target="_blank" rel="noopener noreferrer">Download</a>`
+        : '';
+      const metaParts = [
+        `Source ${formatSeconds(play?.sourceStartSeconds)} - ${formatSeconds(play?.sourceEndSeconds)}`,
+      ];
+      if (typeof play?.trimmedStartSeconds === 'number' && typeof play?.trimmedEndSeconds === 'number') {
+        metaParts.push(`Trimmed ${formatSeconds(play.trimmedStartSeconds)} - ${formatSeconds(play.trimmedEndSeconds)}`);
+      }
+
+      return `<div class="asset-item">
+        <div>
+          <div class="asset-label">${escapeHtml(rallyLabel)}</div>
+          <div class="asset-meta">${escapeHtml(metaParts.join(' • '))}</div>
+        </div>
+        <div class="asset-actions">
+          ${reviewLink}
+          ${clipLink}
+          ${downloadLink}
+        </div>
+      </div>`;
+    }).join('');
   }
 
   function renderOutcomeSummary(playDescriptions) {
@@ -344,7 +408,10 @@ document.addEventListener('DOMContentLoaded', () => {
       const sceneLinkHtml = play.sceneUrl
         ? `<a href="${escapeAttribute(play.sceneUrl)}" target="_blank" rel="noopener noreferrer">Open scene clip</a>`
         : '';
-      const playNumber = typeof play.playIndex === 'number' ? String(play.playIndex) : '—';
+      const playIndex = typeof play.playIndex === 'number' ? play.playIndex : undefined;
+      const rallyNumber = typeof playIndex === 'number' ? playIndex + 1 : undefined;
+      const playNumber = typeof playIndex === 'number' ? String(playIndex) : '—';
+      const rallyId = typeof rallyNumber === 'number' ? `rally-${rallyNumber}` : undefined;
       const outcomeBadgeClass = !outcome
         ? 'play-outcome-badge-pending'
         : outcome.winner === 'main'
@@ -364,10 +431,10 @@ document.addEventListener('DOMContentLoaded', () => {
         ? `<p class="play-outcome-message ${saveMessage.isError ? 'play-outcome-message-error' : 'play-outcome-message-success'}">${escapeHtml(saveMessage.text)}</p>`
         : '';
 
-      return `<article class="play-card" data-play-index="${escapeAttribute(playNumber)}">
+      return `<article${rallyId ? ` id="${escapeAttribute(rallyId)}"` : ''} class="play-card" data-play-index="${escapeAttribute(playNumber)}">
         <div class="play-card-header">
           <div>
-            <h4>Rally ${escapeHtml(playNumber)}</h4>
+            <h4>Rally ${escapeHtml(typeof rallyNumber === 'number' ? String(rallyNumber) : playNumber)}</h4>
             <p class="play-card-meta">
               Source ${escapeHtml(formatSeconds(play.sourceStartSeconds))} - ${escapeHtml(formatSeconds(play.sourceEndSeconds))}
               • Trimmed ${escapeHtml(formatSeconds(play.trimmedStartSeconds))} - ${escapeHtml(formatSeconds(play.trimmedEndSeconds))}
