@@ -13,15 +13,22 @@ document.addEventListener('DOMContentLoaded', () => {
   const detectionFacts = document.getElementById('detectionFacts');
   const rallyFacts = document.getElementById('rallyFacts');
   const rallyLinks = document.getElementById('rallyLinks');
+  const serveFacts = document.getElementById('serveFacts');
+  const serveMarkerTrack = document.getElementById('serveMarkerTrack');
+  const serveEmpty = document.getElementById('serveEmpty');
+  const serveReview = document.getElementById('serveReview');
   const outcomeScoreFacts = document.getElementById('outcomeScoreFacts');
   const outcomeReasonFacts = document.getElementById('outcomeReasonFacts');
   const playActions = document.getElementById('playActions');
+  const previewHint = document.getElementById('previewHint');
   const detailPreview = document.getElementById('detailPreview');
 
   const state = {
     details: undefined,
     savingPlayIndex: undefined,
     playSaveMessage: undefined,
+    savingServePlayIndex: undefined,
+    serveSaveMessage: undefined,
   };
 
   const PLAY_OUTCOME_REASON_OPTIONS = [
@@ -41,6 +48,8 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   playActions?.addEventListener('click', handlePlayActionClick);
+  serveReview?.addEventListener('click', handleServeActionClick);
+  serveMarkerTrack?.addEventListener('click', handleServeActionClick);
 
   loadDetails(recordId);
 
@@ -54,6 +63,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const details = await response.json();
       state.details = details;
       state.savingPlayIndex = undefined;
+      state.savingServePlayIndex = undefined;
       renderDetails(details);
     } catch (error) {
       console.error('Video details error:', error);
@@ -120,16 +130,10 @@ document.addEventListener('DOMContentLoaded', () => {
     renderScenes(details.splitParts || []);
     renderDetection(details.detectionSummary, details.detectionFile, details.playerManifest);
     renderRallySummary(details.playDescriptions);
+    renderServes(details.serves);
     renderOutcomeSummary(details.playDescriptions);
     renderPlayActions(details.playDescriptions, details.playerManifest);
-
-    if (details.trimmedVideo && details.trimmedVideo.url) {
-      detailPreview.src = details.trimmedVideo.url;
-      detailPreview.classList.remove('hidden');
-    } else {
-      detailPreview.removeAttribute('src');
-      detailPreview.classList.add('hidden');
-    }
+    renderPreview(details.trimmedVideo, details.serves);
   }
 
   function renderFacts(container, items) {
@@ -308,6 +312,148 @@ document.addEventListener('DOMContentLoaded', () => {
     }).join('');
   }
 
+  function renderServes(serveTimeline) {
+    if (!serveFacts || !serveReview || !serveEmpty) {
+      return;
+    }
+
+    renderFacts(serveFacts, [
+      ['Active serves', String(toCount(serveTimeline?.summary?.activeServeCount))],
+      ['Auto-detected', String(toCount(serveTimeline?.summary?.detectedServeCount))],
+      ['Corrected', String(toCount(serveTimeline?.summary?.correctedServeCount))],
+      ['Dismissed', String(toCount(serveTimeline?.summary?.dismissedServeCount))],
+      ['Missing', String(toCount(serveTimeline?.summary?.missingServeCount))],
+      ['Generated', formatDateTime(serveTimeline?.generatedAt)],
+    ]);
+
+    const plays = Array.isArray(serveTimeline?.plays) ? serveTimeline.plays : [];
+    if (!plays.length) {
+      serveEmpty.classList.remove('hidden');
+      serveReview.innerHTML = '';
+      return;
+    }
+
+    serveEmpty.classList.add('hidden');
+    serveReview.innerHTML = plays.map((play) => {
+      const serve = play?.serve;
+      const detectedServe = play?.detectedServe;
+      const contactOptions = Array.isArray(play?.contactOptions) ? play.contactOptions : [];
+      const isSaving = state.savingServePlayIndex === play.playIndex;
+      const saveMessage = state.serveSaveMessage?.playIndex === play.playIndex ? state.serveSaveMessage : undefined;
+      const rallyNumber = typeof play?.playIndex === 'number' ? play.playIndex + 1 : undefined;
+      const selectionValue = play.reviewStatus === 'dismissed'
+        ? '__dismiss__'
+        : play.reviewStatus === 'detected'
+          ? '__detected__'
+          : typeof play.selectedContactIndex === 'number'
+            ? String(play.selectedContactIndex)
+            : '';
+      const serveDetailParts = [];
+      if (serve?.detectedActionType) {
+        serveDetailParts.push(`Detected as ${formatActionType(serve.detectedActionType)}`);
+      }
+      if (typeof serve?.actionConfidence === 'number') {
+        serveDetailParts.push(formatConfidence(serve.actionConfidence));
+      }
+      if (serve?.actionReason) {
+        serveDetailParts.push(serve.actionReason);
+      }
+      const serveDetailsHtml = serveDetailParts.length
+        ? `<p class="serve-card-note">${escapeHtml(serveDetailParts.join(' • '))}</p>`
+        : '';
+      const autoDetectedHtml = (play.reviewStatus === 'corrected' || play.reviewStatus === 'dismissed')
+        ? `<p class="serve-card-note"><strong>Auto-detected:</strong> ${escapeHtml(formatServeSummary(detectedServe, 'No serve detected automatically.'))}</p>`
+        : '';
+      const optionHtml = [
+        detectedServe
+          ? `<option value="__detected__"${selectionValue === '__detected__' ? ' selected' : ''}>Use detected serve — ${escapeHtml(formatServeOptionLabel(detectedServe))}</option>`
+          : `<option value=""${selectionValue === '' ? ' selected' : ''}>Select a contact to mark as serve...</option>`,
+        ...contactOptions.map((option) => {
+          return `<option value="${escapeAttribute(String(option.contactIndex))}"${selectionValue === String(option.contactIndex) ? ' selected' : ''}>${escapeHtml(formatServeOptionLabel(option))}</option>`;
+        }),
+        `<option value="__dismiss__"${selectionValue === '__dismiss__' ? ' selected' : ''}>No serve for this rally</option>`,
+      ].join('');
+      const saveMessageHtml = saveMessage
+        ? `<p class="serve-status-message ${saveMessage.isError ? 'serve-status-message-error' : 'serve-status-message-success'}">${escapeHtml(saveMessage.text)}</p>`
+        : '';
+      const rallyReviewLink = rallyNumber
+        ? `<a href="#rally-${escapeAttribute(String(rallyNumber))}">Open rally review</a>`
+        : '';
+
+      return `<article class="play-card serve-card" data-serve-play-index="${escapeAttribute(String(play.playIndex))}" data-has-review-override="${play.hasReviewOverride ? 'true' : 'false'}">
+        <div class="play-card-header">
+          <div>
+            <h4>${escapeHtml(formatRallyLabel(play.playIndex))}</h4>
+            <p class="play-card-meta">
+              Source ${escapeHtml(formatSeconds(play.sourceStartSeconds))} - ${escapeHtml(formatSeconds(play.sourceEndSeconds))}
+              • Trimmed ${escapeHtml(formatSeconds(play.trimmedStartSeconds))} - ${escapeHtml(formatSeconds(play.trimmedEndSeconds))}
+            </p>
+          </div>
+          <div class="play-card-badges">
+            <span class="serve-status-badge serve-status-${escapeAttribute(play.reviewStatus)}">${escapeHtml(formatServeStatus(play.reviewStatus))}</span>
+          </div>
+        </div>
+        <p class="serve-card-current"><strong>Current serve:</strong> ${escapeHtml(formatServeSummary(serve, 'No serve selected for this rally.'))}</p>
+        ${autoDetectedHtml}
+        ${serveDetailsHtml}
+        <div class="serve-controls">
+          <label class="form-group serve-control">
+            <span>Serve selection</span>
+            <select class="text-input serve-selection-select"${isSaving ? ' disabled' : ''}>
+              ${optionHtml}
+            </select>
+          </label>
+          <button type="button" class="btn-secondary serve-save-button" data-play-index="${escapeAttribute(String(play.playIndex))}"${isSaving ? ' disabled' : ''}>${isSaving ? 'Saving...' : 'Save serve'}</button>
+          <button type="button" class="btn-secondary serve-reset-button" data-play-index="${escapeAttribute(String(play.playIndex))}"${!play.hasReviewOverride || isSaving ? ' disabled' : ''}>Reset</button>
+        </div>
+        <div class="asset-actions serve-actions">
+          ${serve ? `<button type="button" class="btn-secondary serve-jump-button" data-seek-time="${escapeAttribute(String(serve.trimmedTimestamp))}">Jump in preview</button>` : ''}
+          ${rallyReviewLink}
+          ${play.sceneUrl ? `<a href="${escapeAttribute(play.sceneUrl)}" target="_blank" rel="noopener noreferrer">Open rally clip</a>` : ''}
+        </div>
+        ${play.updatedAt ? `<p class="serve-card-note">Last updated ${escapeHtml(formatDateTime(play.updatedAt))}</p>` : ''}
+        ${saveMessageHtml}
+      </article>`;
+    }).join('');
+  }
+
+  function renderPreview(trimmedVideo, serveTimeline) {
+    if (!detailPreview || !previewHint || !serveMarkerTrack) {
+      return;
+    }
+
+    const activeServes = Array.isArray(serveTimeline?.serves) ? serveTimeline.serves : [];
+    const trimmedDuration = typeof serveTimeline?.trimmedDurationSeconds === 'number'
+      ? serveTimeline.trimmedDurationSeconds
+      : 0;
+
+    if (trimmedVideo && trimmedVideo.url) {
+      detailPreview.src = trimmedVideo.url;
+      detailPreview.classList.remove('hidden');
+      previewHint.textContent = activeServes.length
+        ? 'Use a serve marker above or a jump button below to seek the trimmed video.'
+        : 'Serve markers will appear here once serve data is available.';
+    } else {
+      detailPreview.removeAttribute('src');
+      detailPreview.classList.add('hidden');
+      previewHint.textContent = 'Trimmed preview is not available yet.';
+    }
+
+    if (!activeServes.length || trimmedDuration <= 0) {
+      serveMarkerTrack.classList.add('hidden');
+      serveMarkerTrack.innerHTML = '';
+      return;
+    }
+
+    serveMarkerTrack.classList.remove('hidden');
+    serveMarkerTrack.innerHTML = activeServes.map((serve) => {
+      const leftPercent = Math.min(98, Math.max(2, (serve.trimmedTimestamp / trimmedDuration) * 100));
+      const markerClass = serve.reviewStatus === 'corrected' ? 'serve-marker serve-marker-corrected' : 'serve-marker';
+      const label = `${formatRallyLabel(serve.playIndex)} • ${serve.displayName} • ${formatSeconds(serve.trimmedTimestamp)}`;
+      return `<button type="button" class="${markerClass}" style="left: ${leftPercent}%" data-seek-time="${escapeAttribute(String(serve.trimmedTimestamp))}" aria-label="${escapeAttribute(label)}" title="${escapeAttribute(label)}"></button>`;
+    }).join('');
+  }
+
   function renderOutcomeSummary(playDescriptions) {
     const scoreSummary = playDescriptions?.scoreSummary || { main: 0, opponent: 0 };
     const outcomeSummary = playDescriptions?.outcomeSummary || {
@@ -478,6 +624,102 @@ document.addEventListener('DOMContentLoaded', () => {
     }).join('');
   }
 
+  async function handleServeActionClick(event) {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+
+    const markerButton = target.closest('.serve-marker');
+    if (markerButton instanceof HTMLButtonElement) {
+      const seekTime = Number(markerButton.getAttribute('data-seek-time'));
+      if (Number.isFinite(seekTime)) {
+        seekPreviewToTime(seekTime);
+      }
+      return;
+    }
+
+    const jumpButton = target.closest('.serve-jump-button');
+    if (jumpButton instanceof HTMLButtonElement) {
+      const seekTime = Number(jumpButton.getAttribute('data-seek-time'));
+      if (Number.isFinite(seekTime)) {
+        seekPreviewToTime(seekTime);
+      }
+      return;
+    }
+
+    const resetButton = target.closest('.serve-reset-button');
+    if (resetButton instanceof HTMLButtonElement) {
+      const playIndex = Number(resetButton.getAttribute('data-play-index'));
+      if (Number.isInteger(playIndex) && playIndex >= 0) {
+        await resetServeReview(playIndex);
+      }
+      return;
+    }
+
+    const saveButton = target.closest('.serve-save-button');
+    if (!(saveButton instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    const playIndex = Number(saveButton.getAttribute('data-play-index'));
+    if (!Number.isInteger(playIndex) || playIndex < 0) {
+      return;
+    }
+
+    const serveCard = saveButton.closest('.serve-card');
+    if (!(serveCard instanceof HTMLElement)) {
+      return;
+    }
+
+    const selection = serveCard.querySelector('.serve-selection-select');
+    const selectedValue = selection instanceof HTMLSelectElement ? selection.value : '';
+
+    if (selectedValue === '__detected__') {
+      const hasReviewOverride = serveCard.getAttribute('data-has-review-override') === 'true';
+      if (!hasReviewOverride) {
+        state.serveSaveMessage = {
+          playIndex,
+          text: 'Already using the detected serve.',
+          isError: false,
+        };
+        renderServes(state.details?.serves);
+        return;
+      }
+
+      await resetServeReview(playIndex, 'Serve review reset to use the detected serve.');
+      return;
+    }
+
+    if (selectedValue === '__dismiss__') {
+      await saveServeReview(playIndex, null);
+      return;
+    }
+
+    if (!selectedValue) {
+      state.serveSaveMessage = {
+        playIndex,
+        text: 'Pick a contact or choose no serve for this rally.',
+        isError: true,
+      };
+      renderServes(state.details?.serves);
+      return;
+    }
+
+    const selectedContactIndex = Number(selectedValue);
+    if (!Number.isInteger(selectedContactIndex) || selectedContactIndex < 0) {
+      state.serveSaveMessage = {
+        playIndex,
+        text: 'Serve selection must reference a valid rally contact.',
+        isError: true,
+      };
+      renderServes(state.details?.serves);
+      return;
+    }
+
+    await saveServeReview(playIndex, selectedContactIndex);
+  }
+
   async function handlePlayActionClick(event) {
     const target = event.target;
     if (!(target instanceof HTMLElement)) {
@@ -557,6 +799,105 @@ document.addEventListener('DOMContentLoaded', () => {
       };
       renderPlayActions(state.details.playDescriptions, state.details.playerManifest);
     }
+  }
+
+  async function saveServeReview(playIndex, selectedContactIndex) {
+    if (!state.details) {
+      return;
+    }
+
+    state.savingServePlayIndex = playIndex;
+    state.serveSaveMessage = undefined;
+    renderServes(state.details.serves);
+
+    try {
+      const response = await fetch(`/api/videos/${encodeURIComponent(recordId)}/serves/${encodeURIComponent(String(playIndex))}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          selectedContactIndex,
+        }),
+      });
+
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || 'Failed to save serve review.');
+      }
+
+      state.serveSaveMessage = {
+        playIndex,
+        text: 'Serve review saved.',
+        isError: false,
+      };
+      await loadDetails(recordId);
+    } catch (error) {
+      console.error('Save serve review error:', error);
+      state.savingServePlayIndex = undefined;
+      state.serveSaveMessage = {
+        playIndex,
+        text: error instanceof Error ? error.message : 'Failed to save serve review.',
+        isError: true,
+      };
+      renderServes(state.details.serves);
+    }
+  }
+
+  async function resetServeReview(playIndex, successMessage = 'Serve review reset to the detected state.') {
+    if (!state.details) {
+      return;
+    }
+
+    state.savingServePlayIndex = playIndex;
+    state.serveSaveMessage = undefined;
+    renderServes(state.details.serves);
+
+    try {
+      const response = await fetch(`/api/videos/${encodeURIComponent(recordId)}/serves/${encodeURIComponent(String(playIndex))}`, {
+        method: 'DELETE',
+      });
+
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || 'Failed to reset serve review.');
+      }
+
+      state.serveSaveMessage = {
+        playIndex,
+        text: successMessage,
+        isError: false,
+      };
+      await loadDetails(recordId);
+    } catch (error) {
+      console.error('Reset serve review error:', error);
+      state.savingServePlayIndex = undefined;
+      state.serveSaveMessage = {
+        playIndex,
+        text: error instanceof Error ? error.message : 'Failed to reset serve review.',
+        isError: true,
+      };
+      renderServes(state.details.serves);
+    }
+  }
+
+  function seekPreviewToTime(seconds) {
+    if (!(detailPreview instanceof HTMLVideoElement) || detailPreview.classList.contains('hidden')) {
+      return;
+    }
+
+    const nextTime = Math.max(0, seconds);
+    const applySeek = () => {
+      detailPreview.currentTime = nextTime;
+    };
+
+    if (detailPreview.readyState >= 1) {
+      applySeek();
+    } else {
+      detailPreview.addEventListener('loadedmetadata', applySeek, { once: true });
+    }
+
+    detailPreview.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
   function showError(message) {
@@ -657,10 +998,34 @@ document.addEventListener('DOMContentLoaded', () => {
     return 'Pending';
   }
 
+  function formatServeStatus(status) {
+    if (status === 'detected') return 'Detected';
+    if (status === 'corrected') return 'Corrected';
+    if (status === 'dismissed') return 'Dismissed';
+    return 'Missing';
+  }
+
+  function formatRallyLabel(playIndex) {
+    return `Rally ${Number.isInteger(playIndex) ? playIndex + 1 : '—'}`;
+  }
+
   function formatActionType(actionType) {
     return (actionType || 'unknown')
       .replace(/-/g, ' ')
       .replace(/\b\w/g, (char) => char.toUpperCase());
+  }
+
+  function formatServeOptionLabel(option) {
+    const actionLabel = option?.detectedActionType ? formatActionType(option.detectedActionType) : 'Contact';
+    return `${actionLabel} • ${option?.displayName || 'Unknown player'} • ${formatSeconds(option?.trimmedTimestamp)}`;
+  }
+
+  function formatServeSummary(serve, fallback) {
+    if (!serve) {
+      return fallback;
+    }
+
+    return `${serve.displayName || `Track ${serve.playerTrackId}`} • ${formatSeconds(serve.trimmedTimestamp)} trimmed • ${formatSeconds(serve.sourceTimestamp)} source`;
   }
 
   function formatOutcomeLabel(outcome) {

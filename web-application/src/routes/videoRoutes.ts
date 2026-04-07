@@ -17,6 +17,14 @@ import {
   PlayOutcomeReason,
   PlayOutcomeWinner,
 } from '../services/cosmosReadModelStore';
+import {
+  ServeContactOption,
+  ServeEvent,
+  ServeReviewManifest,
+  ServeTimelineProjection,
+  buildServeTimeline,
+  createServeReviewOverride,
+} from '../services/serveReview';
 
 const router = Router();
 
@@ -374,20 +382,34 @@ async function readStreamAsString(stream: NodeJS.ReadableStream | undefined): Pr
   return Buffer.concat(chunks).toString('utf8');
 }
 
-async function readJsonBlob<T>(containerName: string, blobName: string): Promise<T> {
+async function readJsonBlobWithEtag<T>(containerName: string, blobName: string): Promise<{ payload: T; etag?: string }> {
   const blobClient = getBlobContainerClient(containerName).getBlobClient(blobName);
   const response = await blobClient.download();
   const raw = await readStreamAsString(response.readableStreamBody);
-  return JSON.parse(raw) as T;
+  return {
+    payload: JSON.parse(raw) as T,
+    etag: response.etag,
+  };
 }
 
-async function writeJsonBlob(containerName: string, blobName: string, payload: unknown): Promise<void> {
+async function readJsonBlob<T>(containerName: string, blobName: string): Promise<T> {
+  const { payload } = await readJsonBlobWithEtag<T>(containerName, blobName);
+  return payload;
+}
+
+async function writeJsonBlob(
+  containerName: string,
+  blobName: string,
+  payload: unknown,
+  conditions?: { ifMatch?: string; ifNoneMatch?: string },
+): Promise<void> {
   const blobClient = getBlobContainerClient(containerName).getBlockBlobClient(blobName);
   const content = JSON.stringify(payload, null, 2);
   await blobClient.upload(content, Buffer.byteLength(content), {
     blobHTTPHeaders: {
       blobContentType: 'application/json',
     },
+    conditions,
   });
 }
 
@@ -655,10 +677,77 @@ async function loadPlayDescriptions(record: VideoStatusRecord): Promise<PlayDesc
   }
 }
 
+function getServeReviewBlobName(recordId: string): string {
+  return `metadata/serve-reviews/${recordId}.json`;
+}
+
+async function loadServeReviewManifest(record: VideoStatusRecord): Promise<ServeReviewManifest | undefined> {
+  const result = await loadServeReviewManifestWithEtag(record);
+  return result.manifest;
+}
+
+async function loadServeReviewManifestWithEtag(record: VideoStatusRecord): Promise<{ manifest?: ServeReviewManifest; etag?: string }> {
+  try {
+    const { payload, etag } = await readJsonBlobWithEtag<ServeReviewManifest>(record.sourceContainer, getServeReviewBlobName(record.recordId));
+    return {
+      manifest: payload,
+      etag,
+    };
+  } catch (error) {
+    if (typeof error === 'object' && error !== null && 'statusCode' in error && Number((error as { statusCode?: number }).statusCode) === 404) {
+      return {};
+    }
+    throw error;
+  }
+}
+
 function buildPlayerImageUrls(record: VideoStatusRecord, imageBlobName?: string) {
   return {
     imageUrl: imageBlobName ? createBlobUrl(record.sourceContainer, imageBlobName) : undefined,
     imageDownloadUrl: imageBlobName ? createBlobUrl(record.sourceContainer, imageBlobName, true) : undefined,
+  };
+}
+
+function buildServeContactOptionResponse(record: VideoStatusRecord, option: ServeContactOption) {
+  return {
+    ...option,
+    ...buildPlayerImageUrls(record, option.imageBlobName),
+  };
+}
+
+function buildServeEventResponse(record: VideoStatusRecord, serve: ServeEvent) {
+  return {
+    ...serve,
+    ...buildPlayerImageUrls(record, serve.imageBlobName),
+    sceneUrl: createBlobUrl(record.sourceContainer, serve.sceneBlobName),
+    sceneDownloadUrl: createBlobUrl(record.sourceContainer, serve.sceneBlobName, true),
+  };
+}
+
+function buildServeTimelineResponse(record: VideoStatusRecord, serveTimeline: ServeTimelineProjection) {
+  return {
+    generatedAt: serveTimeline.generatedAt,
+    trimmedDurationSeconds: serveTimeline.trimmedDurationSeconds,
+    summary: serveTimeline.summary,
+    serves: serveTimeline.serves.map(serve => buildServeEventResponse(record, serve)),
+    plays: serveTimeline.plays.map(play => ({
+      playIndex: play.playIndex,
+      sourceStartSeconds: play.sourceStartSeconds,
+      sourceEndSeconds: play.sourceEndSeconds,
+      trimmedStartSeconds: play.trimmedStartSeconds,
+      trimmedEndSeconds: play.trimmedEndSeconds,
+      sceneBlobName: play.sceneBlobName,
+      sceneUrl: createBlobUrl(record.sourceContainer, play.sceneBlobName),
+      sceneDownloadUrl: createBlobUrl(record.sourceContainer, play.sceneBlobName, true),
+      detectedContactIndex: play.detectedContactIndex,
+      selectedContactIndex: play.selectedContactIndex,
+      detectedServe: play.detectedServe ? buildServeEventResponse(record, play.detectedServe) : undefined,
+      serve: play.serve ? buildServeEventResponse(record, play.serve) : undefined,
+      reviewStatus: play.reviewStatus,
+      hasReviewOverride: play.hasReviewOverride,
+      updatedAt: play.updatedAt,
+      contactOptions: play.contactOptions.map(option => buildServeContactOptionResponse(record, option)),
+    })),
   };
 }
 
@@ -965,6 +1054,31 @@ function parsePlayOutcomeRequest(
   };
 }
 
+function parseServeSelectionRequest(body: unknown): { selectedContactIndex?: number | null; error?: string } {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+    return { error: 'Serve review payload is required.' };
+  }
+
+  if (!('selectedContactIndex' in body)) {
+    return { error: 'selectedContactIndex is required.' };
+  }
+
+  const rawValue = (body as { selectedContactIndex?: unknown }).selectedContactIndex;
+  if (rawValue === null) {
+    return { selectedContactIndex: null };
+  }
+
+  if (typeof rawValue === 'number' && Number.isInteger(rawValue) && rawValue >= 0) {
+    return { selectedContactIndex: rawValue };
+  }
+
+  if (typeof rawValue === 'string' && /^\d+$/.test(rawValue.trim())) {
+    return { selectedContactIndex: Number.parseInt(rawValue.trim(), 10) };
+  }
+
+  return { error: 'selectedContactIndex must be a non-negative integer or null.' };
+}
+
 function getPlayerTeamKey(teamId: number, teamSide?: TeamSide): string {
   return `${teamId}:${teamSide ?? ''}`;
 }
@@ -1224,6 +1338,12 @@ router.get('/:recordId/details', rateLimit({ windowMs: 60_000, limit: 120, stand
     const detectionSummary = await loadDetectionSummary(record);
     const playerManifest = await loadPlayerManifest(record);
     const playDescriptions = await loadPlayDescriptions(record);
+    const serveReviewManifest = await loadServeReviewManifest(record);
+    const serveTimeline = buildServeTimelineResponse(record, buildServeTimeline({
+      playerManifest,
+      playDescriptions,
+      reviewManifest: serveReviewManifest,
+    }));
 
     res.json({
       ...mapStatusResponse(record),
@@ -1236,6 +1356,7 @@ router.get('/:recordId/details', rateLimit({ windowMs: 60_000, limit: 120, stand
       playersPageUrl: `/videos/${encodeURIComponent(record.recordId)}/players`,
       playerManifest: buildPlayerManifestResponse(record, playerManifest),
       playDescriptions: buildPlayDescriptionsResponse(record, playDescriptions),
+      serves: serveTimeline,
     });
   } catch (error) {
     console.error('Video details error:', error);
@@ -1267,6 +1388,208 @@ router.get('/:recordId/plays', rateLimit({ windowMs: 60_000, limit: 120, standar
   } catch (error) {
     console.error('Play descriptions error:', error);
     res.status(500).json({ error: 'Failed to load play descriptions' });
+  }
+});
+
+router.get('/:recordId/serves', rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: true, legacyHeaders: false }), async (req: Request, res: Response): Promise<void> => {
+  try {
+    const recordIdParam = req.params.recordId;
+    const recordId = typeof recordIdParam === 'string' ? recordIdParam.trim() : '';
+    if (!recordId) {
+      res.status(400).json({ error: 'recordId is required' });
+      return;
+    }
+
+    const record = await getVideoRecord(recordId);
+    if (!record) {
+      res.status(404).json({ error: 'Video serves not found', recordId });
+      return;
+    }
+
+    const playerManifest = await loadPlayerManifest(record);
+    const playDescriptions = await loadPlayDescriptions(record);
+    const serveReviewManifest = await loadServeReviewManifest(record);
+
+    res.json({
+      ...mapStatusResponse(record),
+      playersPageUrl: `/videos/${encodeURIComponent(record.recordId)}/players`,
+      videoDetailsUrl: `/videos/${encodeURIComponent(record.recordId)}`,
+      serves: buildServeTimelineResponse(record, buildServeTimeline({
+        playerManifest,
+        playDescriptions,
+        reviewManifest: serveReviewManifest,
+      })),
+    });
+  } catch (error) {
+    console.error('Serve timeline error:', error);
+    res.status(500).json({ error: 'Failed to load serve timeline' });
+  }
+});
+
+router.put('/:recordId/serves/:playIndex', rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: true, legacyHeaders: false }), async (req: Request, res: Response): Promise<void> => {
+  try {
+    const recordIdParam = req.params.recordId;
+    const recordId = typeof recordIdParam === 'string' ? recordIdParam.trim() : '';
+    if (!recordId) {
+      res.status(400).json({ error: 'recordId is required' });
+      return;
+    }
+
+    const playIndex = parsePlayIndexParam(req.params.playIndex);
+    if (playIndex === undefined) {
+      res.status(400).json({ error: 'playIndex must be a non-negative integer.' });
+      return;
+    }
+
+    const record = await getVideoRecord(recordId);
+    if (!record) {
+      res.status(404).json({ error: 'Video serve not found', recordId, playIndex });
+      return;
+    }
+
+    const playDescriptions = await loadPlayDescriptions(record);
+    if (!playDescriptions) {
+      res.status(409).json({ error: 'Serve review is not available until play descriptions have been generated.' });
+      return;
+    }
+
+    const play = playDescriptions.plays.find(item => item.playIndex === playIndex);
+    if (!play) {
+      res.status(404).json({ error: `Play ${playIndex} not found for this video.`, recordId, playIndex });
+      return;
+    }
+
+    const { selectedContactIndex, error } = parseServeSelectionRequest(req.body);
+    if (error || selectedContactIndex === undefined) {
+      res.status(400).json({ error: error ?? 'selectedContactIndex is required.' });
+      return;
+    }
+
+    if (selectedContactIndex !== null && !play.contacts[selectedContactIndex]) {
+      res.status(400).json({ error: `selectedContactIndex must reference one of the ${play.contacts.length} contacts in play ${playIndex}.` });
+      return;
+    }
+
+    const updatedAt = new Date().toISOString();
+    const { manifest: existingManifest, etag } = await loadServeReviewManifestWithEtag(record);
+    const nextPlayOverrides = (existingManifest?.plays ?? []).filter(item => item.playIndex !== playIndex);
+    const nextOverride = selectedContactIndex === null
+      ? {
+          playIndex,
+          dismissed: true,
+          updatedAt,
+        }
+      : createServeReviewOverride(play, selectedContactIndex, updatedAt);
+
+    if (!nextOverride) {
+      res.status(400).json({ error: `selectedContactIndex must reference one of the ${play.contacts.length} contacts in play ${playIndex}.` });
+      return;
+    }
+
+    const nextManifest: ServeReviewManifest = {
+      recordId,
+      updatedAt,
+      plays: [...nextPlayOverrides, nextOverride].sort((left, right) => left.playIndex - right.playIndex),
+    };
+
+    await writeJsonBlob(
+      record.sourceContainer,
+      getServeReviewBlobName(recordId),
+      nextManifest,
+      existingManifest ? { ifMatch: etag } : { ifNoneMatch: '*' },
+    );
+
+    const playerManifest = await loadPlayerManifest(record);
+    const serves = buildServeTimelineResponse(record, buildServeTimeline({
+      playerManifest,
+      playDescriptions,
+      reviewManifest: nextManifest,
+    }));
+
+    res.json({
+      success: true,
+      serves,
+      play: serves.plays.find(item => item.playIndex === playIndex),
+    });
+  } catch (error) {
+    if (typeof error === 'object' && error !== null && 'statusCode' in error && Number((error as { statusCode?: number }).statusCode) === 412) {
+      res.status(409).json({ error: 'Serve review changed while you were editing. Reload the page and try again.' });
+      return;
+    }
+    console.error('Serve review update error:', error);
+    res.status(500).json({ error: 'Failed to update serve review' });
+  }
+});
+
+router.delete('/:recordId/serves/:playIndex', rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: true, legacyHeaders: false }), async (req: Request, res: Response): Promise<void> => {
+  try {
+    const recordIdParam = req.params.recordId;
+    const recordId = typeof recordIdParam === 'string' ? recordIdParam.trim() : '';
+    if (!recordId) {
+      res.status(400).json({ error: 'recordId is required' });
+      return;
+    }
+
+    const playIndex = parsePlayIndexParam(req.params.playIndex);
+    if (playIndex === undefined) {
+      res.status(400).json({ error: 'playIndex must be a non-negative integer.' });
+      return;
+    }
+
+    const record = await getVideoRecord(recordId);
+    if (!record) {
+      res.status(404).json({ error: 'Video serve not found', recordId, playIndex });
+      return;
+    }
+
+    const playDescriptions = await loadPlayDescriptions(record);
+    if (!playDescriptions) {
+      res.status(409).json({ error: 'Serve review is not available until play descriptions have been generated.' });
+      return;
+    }
+
+    const play = playDescriptions.plays.find(item => item.playIndex === playIndex);
+    if (!play) {
+      res.status(404).json({ error: `Play ${playIndex} not found for this video.`, recordId, playIndex });
+      return;
+    }
+
+    const updatedAt = new Date().toISOString();
+    const { manifest: existingManifest, etag } = await loadServeReviewManifestWithEtag(record);
+    const nextManifest: ServeReviewManifest = {
+      recordId,
+      updatedAt,
+      plays: (existingManifest?.plays ?? []).filter(item => item.playIndex !== playIndex),
+    };
+
+    if (existingManifest) {
+      await writeJsonBlob(
+        record.sourceContainer,
+        getServeReviewBlobName(recordId),
+        nextManifest,
+        { ifMatch: etag },
+      );
+    }
+
+    const playerManifest = await loadPlayerManifest(record);
+    const serves = buildServeTimelineResponse(record, buildServeTimeline({
+      playerManifest,
+      playDescriptions,
+      reviewManifest: nextManifest,
+    }));
+
+    res.json({
+      success: true,
+      serves,
+      play: serves.plays.find(item => item.playIndex === playIndex),
+    });
+  } catch (error) {
+    if (typeof error === 'object' && error !== null && 'statusCode' in error && Number((error as { statusCode?: number }).statusCode) === 412) {
+      res.status(409).json({ error: 'Serve review changed while you were editing. Reload the page and try again.' });
+      return;
+    }
+    console.error('Serve review reset error:', error);
+    res.status(500).json({ error: 'Failed to reset serve review' });
   }
 });
 

@@ -1019,6 +1019,126 @@ footer {
   font-size: 0.92rem;
 }
 
+.serve-review-list {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.serve-marker-track {
+  position: relative;
+  height: 3rem;
+  margin-top: 1rem;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.serve-marker-track::before {
+  content: '';
+  position: absolute;
+  left: 1rem;
+  right: 1rem;
+  top: 50%;
+  height: 0.3rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  transform: translateY(-50%);
+}
+
+.serve-marker {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 1rem;
+  height: 1rem;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  background: #3498db;
+  box-shadow: 0 0 0 4px rgba(52, 152, 219, 0.18);
+  cursor: pointer;
+}
+
+.serve-marker-corrected {
+  background: #f39c12;
+  box-shadow: 0 0 0 4px rgba(243, 156, 18, 0.18);
+}
+
+.serve-card-current,
+.serve-card-note {
+  margin-top: 0.75rem;
+  color: #d8d8d8;
+}
+
+.serve-status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 0.35rem 0.8rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.serve-status-detected {
+  background: rgba(52, 152, 219, 0.18);
+  color: #9dd6ff;
+}
+
+.serve-status-corrected {
+  background: rgba(243, 156, 18, 0.18);
+  color: #ffd089;
+}
+
+.serve-status-dismissed {
+  background: rgba(231, 76, 60, 0.18);
+  color: #ffb3ab;
+}
+
+.serve-status-missing {
+  background: rgba(255, 255, 255, 0.12);
+  color: #dddddd;
+}
+
+.serve-controls {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto auto;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  align-items: end;
+}
+
+.serve-control {
+  margin-top: 0;
+}
+
+.serve-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.serve-actions .btn-secondary,
+.serve-controls .btn-secondary {
+  width: auto;
+  margin-top: 0;
+  padding: 0.75rem 1rem;
+}
+
+.serve-status-message {
+  margin-top: 0.75rem;
+  font-size: 0.92rem;
+}
+
+.serve-status-message-success {
+  color: #8ff0b2;
+}
+
+.serve-status-message-error {
+  color: #ffb3ab;
+}
+
 @media (max-width: 600px) {
   .container {
     padding: 1rem;
@@ -1052,6 +1172,19 @@ footer {
   .play-card-header,
   .play-action-header {
     flex-direction: column;
+  }
+
+  .serve-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .serve-actions {
+    flex-direction: column;
+  }
+
+  .serve-actions .btn-secondary,
+  .serve-controls .btn-secondary {
+    width: 100%;
   }
 
   .play-card-badges {

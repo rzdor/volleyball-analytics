@@ -64,13 +64,25 @@
         </div>
 
         <div class="analysis-section">
+          <h3>Serve timeline</h3>
+          <div id="serveFacts" class="status-facts"></div>
+          <div id="serveMarkerTrack" class="serve-marker-track hidden"></div>
+          <p id="serveEmpty" class="detail-empty hidden">Serve data is not available yet.</p>
+          <div id="serveReview" class="serve-review-list"></div>
+        </div>
+
+        <div class="analysis-section">
           <h3>Rally review</h3>
           <div id="playOutcomeSummary"></div>
           <div id="playTagStatus" class="play-tag-status hidden" aria-live="polite"></div>
           <div id="playActions" class="play-actions"></div>
         </div>
 
-        <video id="detailPreview" controls class="processed-video hidden"></video>
+        <div class="analysis-section">
+          <h3>Trimmed video preview</h3>
+          <p id="previewHint" class="detail-empty">Use a serve marker or a jump button below to seek the trimmed video.</p>
+          <video id="detailPreview" controls class="processed-video hidden"></video>
+        </div>
       </div>
     </main>
   </div>
