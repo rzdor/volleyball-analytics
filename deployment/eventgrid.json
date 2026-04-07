@@ -11,7 +11,7 @@
     },
     "location": {
       "type": "string",
-      "defaultValue": "[resourceGroup().location]",
+      "defaultValue": "centralus",
       "metadata": {
         "description": "Azure region. Must match the infrastructure deployment."
       }

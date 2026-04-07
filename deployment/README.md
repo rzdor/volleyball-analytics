@@ -77,6 +77,12 @@ The workbook queries these Log Analytics tables:
 - Azure CLI installed (`az`)
 - An Azure subscription
 
+## GitHub Actions deployment workflow
+
+The manual `Deploy Infrastructure, Code & Monitoring` workflow now includes an optional
+`clean_database` input. When enabled, it clears the Cosmos read-model container and the
+Azure Table video-record rows **without deleting the underlying resources or resource group**.
+
 ## Deploy
 
 ```bash
@@ -84,7 +90,7 @@ The workbook queries these Log Analytics tables:
 az login
 
 # Create resource group (if needed)
-az group create --name volleyball-rg --location eastus
+az group create --name volleyball-rg --location centralus
 
 # Step 1: Deploy infrastructure
 az deployment group create \

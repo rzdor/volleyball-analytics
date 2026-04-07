@@ -1,10 +1,11 @@
-# Full deployment pipeline: Infrastructure → Code → EventGrid → Monitoring
+# Full deployment pipeline: Infrastructure → Cleanup → Code → EventGrid → Monitoring
 #
 # Runs the complete deployment sequence:
 #   1. Deploy ARM infrastructure template (azuredeploy.json)
-#   2. Build and deploy web app + function app/container worker code
-#   3. Deploy EventGrid wiring (eventgrid.json)
-#   4. Deploy monitoring workbook and diagnostics (monitoring-workbook.json)
+#   2. Optionally clear persisted database contents without deleting resources
+#   3. Build and deploy web app + function app/container worker code
+#   4. Deploy EventGrid wiring (eventgrid.json)
+#   5. Deploy monitoring workbook and diagnostics (monitoring-workbook.json)
 #
 # Requires a single manual approval at the start via the 'Development' environment
 # to prevent accidental environment recreation.
@@ -42,9 +43,13 @@ on:
       azure_location:
         description: 'Azure region for resource group'
         type: string
-        default: 'eastus'
+        default: 'centralus'
       clean_resource_group:
         description: 'Delete existing resource group before deploying (destroys all resources!)'
+        type: boolean
+        default: false
+      clean_database:
+        description: 'Clear Cosmos read-model documents and video record table rows without deleting the resources'
         type: boolean
         default: false
       function_ready_timeout_seconds:
@@ -128,11 +133,65 @@ jobs:
         deploymentMode: Incremental
 
   # ──────────────────────────────────────────────
-  # Step 2: Build and deploy application code in parallel
+  # Step 2: Optionally clear persisted database contents
+  # ──────────────────────────────────────────────
+  clean_database:
+    needs: [approve, deploy_infrastructure]
+    if: ${{ always() && inputs.clean_database && needs.approve.result == 'success' && (needs.deploy_infrastructure.result == 'success' || needs.deploy_infrastructure.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    environment:
+      name: 'Development'
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+
+    - name: Azure Login using OIDC
+      uses: azure/login@v2
+      with:
+        client-id: ${{ secrets.AZURE_CLIENT_ID }}
+        tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+        subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+    - name: Resolve database resource names
+      id: database_resources
+      run: |
+        node <<'NODE'
+        const fs = require('fs');
+        const template = JSON.parse(fs.readFileSync('deployment/azuredeploy.json', 'utf8'));
+        const parameterFile = JSON.parse(fs.readFileSync('deployment/azuredeploy.parameters.json', 'utf8')).parameters ?? {};
+        const getValue = (name, fallback) => parameterFile[name]?.value ?? template.parameters?.[name]?.defaultValue ?? fallback;
+        const projectName = String(getValue('projectName', 'volleyball'));
+        const compactProjectName = projectName.toLowerCase().replace(/-/g, '');
+        const lines = [
+          `storage_account_name=${compactProjectName}storage`,
+          `video_records_table_name=${String(getValue('videoRecordsTableName', 'videoprocessingrecords'))}`,
+          `cosmos_account_name=${compactProjectName}cosmos`,
+          `cosmos_database_name=${String(getValue('cosmosDbDatabaseName', 'readmodel'))}`,
+          `cosmos_container_name=${String(getValue('cosmosDbContainerName', 'videoprocessingrecords'))}`,
+        ];
+        fs.appendFileSync(process.env.GITHUB_OUTPUT, `${lines.join('\n')}\n`);
+        NODE
+
+    - name: Clean database contents
+      env:
+        AZURE_RESOURCE_GROUP: ${{ env.AZURE_RESOURCE_GROUP }}
+        STORAGE_ACCOUNT_NAME: ${{ steps.database_resources.outputs.storage_account_name }}
+        VIDEO_RECORDS_TABLE_NAME: ${{ steps.database_resources.outputs.video_records_table_name }}
+        COSMOS_ACCOUNT_NAME: ${{ steps.database_resources.outputs.cosmos_account_name }}
+        COSMOS_DB_DATABASE_NAME: ${{ steps.database_resources.outputs.cosmos_database_name }}
+        COSMOS_DB_CONTAINER_NAME: ${{ steps.database_resources.outputs.cosmos_container_name }}
+      run: node deployment/scripts/clean-database.mjs
+
+  # ──────────────────────────────────────────────
+  # Step 3: Build and deploy application code in parallel
   # ──────────────────────────────────────────────
   build_and_deploy_web:
-    needs: [approve, deploy_infrastructure]
-    if: ${{ always() && inputs.deploy_code && needs.approve.result == 'success' && (needs.deploy_infrastructure.result == 'success' || needs.deploy_infrastructure.result == 'skipped') }}
+    needs: [approve, deploy_infrastructure, clean_database]
+    if: ${{ always() && inputs.deploy_code && needs.approve.result == 'success' && (needs.deploy_infrastructure.result == 'success' || needs.deploy_infrastructure.result == 'skipped') && (needs.clean_database.result == 'success' || needs.clean_database.result == 'skipped') }}
     runs-on: ubuntu-latest
     environment:
       name: 'Development'
@@ -188,8 +247,8 @@ jobs:
         package: web-app.zip
 
   build_and_deploy_functions:
-    needs: [approve, deploy_infrastructure]
-    if: ${{ always() && inputs.deploy_code && needs.approve.result == 'success' && (needs.deploy_infrastructure.result == 'success' || needs.deploy_infrastructure.result == 'skipped') }}
+    needs: [approve, deploy_infrastructure, clean_database]
+    if: ${{ always() && inputs.deploy_code && needs.approve.result == 'success' && (needs.deploy_infrastructure.result == 'success' || needs.deploy_infrastructure.result == 'skipped') && (needs.clean_database.result == 'success' || needs.clean_database.result == 'skipped') }}
     runs-on: ubuntu-latest
     environment:
       name: 'Development'
@@ -229,8 +288,8 @@ jobs:
       run: az webapp restart --name ${{ env.AZURE_FUNCTIONAPP_NAME }} --resource-group ${{ env.AZURE_RESOURCE_GROUP }}
 
   build_and_deploy_worker:
-    needs: [approve, deploy_infrastructure]
-    if: ${{ always() && inputs.deploy_code && needs.approve.result == 'success' && (needs.deploy_infrastructure.result == 'success' || needs.deploy_infrastructure.result == 'skipped') }}
+    needs: [approve, deploy_infrastructure, clean_database]
+    if: ${{ always() && inputs.deploy_code && needs.approve.result == 'success' && (needs.deploy_infrastructure.result == 'success' || needs.deploy_infrastructure.result == 'skipped') && (needs.clean_database.result == 'success' || needs.clean_database.result == 'skipped') }}
     runs-on: ubuntu-latest
     environment:
       name: 'Development'
@@ -274,7 +333,7 @@ jobs:
           --image ${{ env.ACR_NAME }}.azurecr.io/${{ env.ACR_WORKER_IMAGE }}:${{ github.sha }}
 
   # ──────────────────────────────────────────────
-  # Step 3: Deploy EventGrid wiring
+  # Step 4: Deploy EventGrid wiring
   # ──────────────────────────────────────────────
   deploy_eventgrid:
     needs: [build_and_deploy_web, build_and_deploy_functions, build_and_deploy_worker]
@@ -333,7 +392,7 @@ jobs:
         deploymentMode: Incremental
 
   # ──────────────────────────────────────────────
-  # Step 4: Deploy monitoring workbook and diagnostics
+  # Step 5: Deploy monitoring workbook and diagnostics
   # ──────────────────────────────────────────────
   deploy_monitoring:
     needs: [approve, build_and_deploy_web, build_and_deploy_functions, build_and_deploy_worker, deploy_eventgrid]
