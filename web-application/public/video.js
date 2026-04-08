@@ -29,6 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
     playSaveMessage: undefined,
     savingServePlayIndex: undefined,
     serveSaveMessage: undefined,
+    assetDurationCache: Object.create(null),
   };
 
   const PLAY_OUTCOME_REASON_OPTIONS = [
@@ -61,6 +62,9 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       const details = await response.json();
+      if (state.details?.recordId !== details.recordId) {
+        state.assetDurationCache = Object.create(null);
+      }
       state.details = details;
       state.savingPlayIndex = undefined;
       state.savingServePlayIndex = undefined;
@@ -164,11 +168,13 @@ document.addEventListener('DOMContentLoaded', () => {
       { label: 'Converted 720p video', asset: details.convertedVideo },
       { label: 'Trimmed full video', asset: details.trimmedVideo },
       { label: 'Detection JSON', asset: details.detectionFile },
-      { label: 'Player manifest', asset: details.playerManifestBlobName ? {
+      { label: 'Player manifest', asset: details.playerManifestFile || (details.playerManifestBlobName ? {
         name: details.playerManifestBlobName.split('/').pop(),
+        blobName: details.playerManifestBlobName,
         url: details.playerManifestBlobUrl,
         downloadUrl: details.playerManifestBlobUrl,
-      } : null },
+        contentType: 'application/json',
+      } : null) },
     ].filter(item => item.asset);
 
     if (assets.length === 0) {
@@ -177,10 +183,31 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     assetLinks.innerHTML = assets.map(({ label, asset }) => {
+      const metaParts = [asset.name];
+      if (typeof asset.size === 'number') {
+        metaParts.push(formatFileSize(asset.size));
+      }
+
+      if (isVideoAsset(asset)) {
+        let durationState = getAssetDurationState(asset);
+        if (!durationState) {
+          ensureAssetDuration(asset);
+          durationState = getAssetDurationState(asset);
+        }
+
+        if (durationState?.status === 'ready' && typeof durationState.durationSeconds === 'number') {
+          metaParts.push(`Length ${formatMediaDuration(durationState.durationSeconds)}`);
+        } else if (durationState?.status === 'failed') {
+          metaParts.push('Length unavailable');
+        } else {
+          metaParts.push('Length loading...');
+        }
+      }
+
       return `<div class="asset-item">
         <div>
           <div class="asset-label">${escapeHtml(label)}</div>
-          <div class="asset-meta">${escapeHtml(asset.name)}</div>
+          <div class="asset-meta">${escapeHtml(metaParts.join(' • '))}</div>
         </div>
         <div class="asset-actions">
           <a href="${escapeAttribute(asset.url)}" target="_blank" rel="noopener noreferrer">Open</a>
@@ -188,6 +215,71 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>
       </div>`;
     }).join('');
+  }
+
+  function getAssetDurationCacheKey(asset) {
+    return typeof asset?.blobName === 'string' && asset.blobName
+      ? asset.blobName
+      : typeof asset?.name === 'string'
+        ? asset.name
+        : typeof asset?.url === 'string'
+          ? asset.url
+          : '';
+  }
+
+  function getAssetDurationState(asset) {
+    const key = getAssetDurationCacheKey(asset);
+    return key ? state.assetDurationCache[key] : undefined;
+  }
+
+  function ensureAssetDuration(asset) {
+    if (!asset?.url || !isVideoAsset(asset)) {
+      return;
+    }
+
+    const key = getAssetDurationCacheKey(asset);
+    if (!key || state.assetDurationCache[key]) {
+      return;
+    }
+
+    state.assetDurationCache[key] = { status: 'loading' };
+
+    const media = document.createElement('video');
+    media.preload = 'metadata';
+
+    const finish = (status, durationSeconds) => {
+      media.onloadedmetadata = null;
+      media.onerror = null;
+      media.removeAttribute('src');
+      state.assetDurationCache[key] = status === 'ready'
+        ? { status, durationSeconds }
+        : { status };
+      if (state.details) {
+        renderAssets(state.details);
+      }
+    };
+
+    media.onloadedmetadata = () => {
+      const durationSeconds = Number.isFinite(media.duration) && media.duration >= 0
+        ? media.duration
+        : undefined;
+      finish(typeof durationSeconds === 'number' ? 'ready' : 'failed', durationSeconds);
+    };
+    media.onerror = () => finish('failed');
+    media.src = asset.url;
+    media.load();
+  }
+
+  function isVideoAsset(asset) {
+    const contentType = typeof asset?.contentType === 'string'
+      ? asset.contentType.trim().toLowerCase()
+      : '';
+    if (contentType.startsWith('video/')) {
+      return true;
+    }
+
+    const filename = typeof asset?.name === 'string' ? asset.name.trim().toLowerCase() : '';
+    return ['.mp4', '.mov', '.m4v', '.avi', '.mkv', '.webm', '.mpg', '.mpeg'].some((extension) => filename.endsWith(extension));
   }
 
   function renderScenes(splitParts) {
@@ -967,6 +1059,22 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     const precision = unitIndex === 0 ? 0 : 1;
     return `${value.toFixed(precision)} ${units[unitIndex]}`;
+  }
+
+  function formatMediaDuration(value) {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+      return '—';
+    }
+
+    const roundedSeconds = Math.max(0, Math.round(value));
+    const hours = Math.floor(roundedSeconds / 3600);
+    const minutes = Math.floor((roundedSeconds % 3600) / 60);
+    const seconds = roundedSeconds % 60;
+    if (hours > 0) {
+      return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    }
+
+    return `${minutes}:${String(seconds).padStart(2, '0')}`;
   }
 
   function formatDateTime(value) {

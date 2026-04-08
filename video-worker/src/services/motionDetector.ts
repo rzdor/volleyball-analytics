@@ -4,9 +4,16 @@ import fs from 'fs';
 import os from 'os';
 import { getVideoMetadata } from './frameExtractor';
 
+export const DEFAULT_MOTION_SAMPLE_FPS = 5;
+export const DEFAULT_MOTION_THRESHOLD = 0.005;
+const DEFAULT_MIN_SEGMENT_LENGTH = 3;
+const DEFAULT_PRE_ROLL = 1;
+const DEFAULT_POST_ROLL = 1;
+const DEFAULT_SMOOTHING_WINDOW = 3;
+
 export interface MotionDetectorOptions {
-  sampleFps?: number;          // Frames to sample per second (default: 2)
-  threshold?: number;          // Motion score threshold 0–1 (default: 0.02)
+  sampleFps?: number;          // Frames to sample per second (default: 5)
+  threshold?: number;          // Motion score threshold 0–1 (default: 0.005)
   minSegmentLength?: number;   // Minimum play segment in seconds (default: 3)
   preRoll?: number;            // Seconds of padding before play (default: 1)
   postRoll?: number;           // Seconds of padding after play (default: 1)
@@ -147,12 +154,12 @@ export async function detectMotionSegments(
   options: MotionDetectorOptions = {}
 ): Promise<TimeRange[]> {
   const {
-    sampleFps = 2,
-    threshold = 0.02,
-    minSegmentLength = 3,
-    preRoll = 1,
-    postRoll = 1,
-    smoothingWindow = 3,
+    sampleFps = DEFAULT_MOTION_SAMPLE_FPS,
+    threshold = DEFAULT_MOTION_THRESHOLD,
+    minSegmentLength = DEFAULT_MIN_SEGMENT_LENGTH,
+    preRoll = DEFAULT_PRE_ROLL,
+    postRoll = DEFAULT_POST_ROLL,
+    smoothingWindow = DEFAULT_SMOOTHING_WINDOW,
   } = options;
 
   const metadata = await getVideoMetadata(videoPath);

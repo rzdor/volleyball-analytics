@@ -106,6 +106,7 @@ type BlobAsset = {
   downloadUrl: string;
   size?: number;
   lastModified?: string;
+  contentType?: string;
 };
 
 type DetectionSummary = {
@@ -359,7 +360,13 @@ function createBlobUploadTarget(containerName: string, blobName: string): {
   };
 }
 
-function buildBlobAsset(containerName: string, blobName: string, size?: number, lastModified?: Date): BlobAsset {
+function buildBlobAsset(
+  containerName: string,
+  blobName: string,
+  size?: number,
+  lastModified?: Date,
+  contentType?: string
+): BlobAsset {
   return {
     name: path.basename(blobName),
     blobName,
@@ -367,7 +374,28 @@ function buildBlobAsset(containerName: string, blobName: string, size?: number, 
     downloadUrl: createBlobUrl(containerName, blobName, true),
     size,
     lastModified: lastModified?.toISOString(),
+    contentType,
   };
+}
+
+async function loadBlobAsset(containerName: string, blobName: string): Promise<BlobAsset> {
+  const blobClient = getBlobContainerClient(containerName).getBlobClient(blobName);
+
+  try {
+    const properties = await blobClient.getProperties();
+    return buildBlobAsset(
+      containerName,
+      blobName,
+      properties.contentLength,
+      properties.lastModified,
+      properties.contentType,
+    );
+  } catch (error) {
+    if (typeof error === 'object' && error !== null && 'statusCode' in error && Number((error as { statusCode?: number }).statusCode) === 404) {
+      return buildBlobAsset(containerName, blobName);
+    }
+    throw error;
+  }
 }
 
 async function readStreamAsString(stream: NodeJS.ReadableStream | undefined): Promise<string> {
@@ -542,7 +570,8 @@ async function listProcessedAssets(record: VideoStatusRecord): Promise<BlobAsset
       record.sourceContainer,
       blob.name,
       blob.properties.contentLength,
-      blob.properties.lastModified
+      blob.properties.lastModified,
+      blob.properties.contentType
     ));
   }
 
@@ -1322,16 +1351,20 @@ router.get('/:recordId/details', rateLimit({ windowMs: 60_000, limit: 120, stand
     }
 
     const processedAssets = await listProcessedAssets(record);
+    const processedAssetMap = new Map(processedAssets.map(asset => [asset.blobName, asset]));
     const convertedVideo = record.convertedBlobName
-      ? buildBlobAsset(record.sourceContainer, record.convertedBlobName)
+      ? processedAssetMap.get(record.convertedBlobName) ?? buildBlobAsset(record.sourceContainer, record.convertedBlobName)
       : undefined;
     const trimmedVideo = record.processedBlobName
-      ? buildBlobAsset(record.sourceContainer, record.processedBlobName)
+      ? processedAssetMap.get(record.processedBlobName) ?? buildBlobAsset(record.sourceContainer, record.processedBlobName)
       : undefined;
     const detectionFile = record.detectionBlobName
-      ? buildBlobAsset(record.sourceContainer, record.detectionBlobName)
+      ? processedAssetMap.get(record.detectionBlobName) ?? buildBlobAsset(record.sourceContainer, record.detectionBlobName)
       : undefined;
-    const sourceVideo = buildBlobAsset(record.sourceContainer, record.sourceBlobName);
+    const playerManifestFile = record.playerManifestBlobName
+      ? processedAssetMap.get(record.playerManifestBlobName) ?? buildBlobAsset(record.sourceContainer, record.playerManifestBlobName)
+      : undefined;
+    const sourceVideo = await loadBlobAsset(record.sourceContainer, record.sourceBlobName);
     const splitParts = processedAssets.filter(asset =>
       asset.blobName !== record.convertedBlobName && asset.blobName !== record.processedBlobName
     );
@@ -1352,6 +1385,7 @@ router.get('/:recordId/details', rateLimit({ windowMs: 60_000, limit: 120, stand
       trimmedVideo,
       splitParts,
       detectionFile,
+      playerManifestFile,
       detectionSummary,
       playersPageUrl: `/videos/${encodeURIComponent(record.recordId)}/players`,
       playerManifest: buildPlayerManifestResponse(record, playerManifest),
