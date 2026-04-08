@@ -46,32 +46,71 @@ function getErrorMessage(error: unknown): string {
   return raw.length > 2000 ? `${raw.slice(0, 1997)}...` : raw;
 }
 
+function getDequeueCount(context: InvocationContext): number | undefined {
+  const metadata = context.triggerMetadata;
+  const rawValues = [
+    metadata?.dequeueCount,
+    metadata?.DequeueCount,
+    metadata?.dequeuecount,
+  ];
+
+  for (const rawValue of rawValues) {
+    const parsed = typeof rawValue === 'number'
+      ? rawValue
+      : Number.parseInt(String(rawValue ?? ''), 10);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+
+  return undefined;
+}
+
+function getRetryCount(context: InvocationContext): number {
+  const dequeueCount = getDequeueCount(context);
+  return dequeueCount && dequeueCount > 1 ? dequeueCount - 1 : 0;
+}
+
 export async function importVideoFromUrlHandler(queueEntry: unknown, context: InvocationContext): Promise<void> {
-  const recordStore = getVideoRecordStore();
-  const convertQueue = getProcessingQueue('convert');
+  let parsedMessage: VideoUrlImportMessage | undefined;
+  let recordStore: ReturnType<typeof getVideoRecordStore> | undefined;
+  const dequeueCount = getDequeueCount(context);
+  const retryCount = getRetryCount(context);
 
   try {
-    const message = parseQueueMessage(queueEntry);
-    const record = await recordStore.get(message.recordId);
+    parsedMessage = parseQueueMessage(queueEntry);
+    recordStore = getVideoRecordStore();
+    const convertQueue = getProcessingQueue('convert');
+
+    context.log('importVideoFromUrl starting import job', {
+      recordId: parsedMessage.recordId,
+      sourceBlobName: parsedMessage.sourceBlobName,
+      dequeueCount,
+      retryCount,
+    });
+
+    const record = await recordStore.get(parsedMessage.recordId);
 
     if (!record) {
-      throw new Error(`No video record found for import job ${message.recordId}`);
+      throw new Error(`No video record found for import job ${parsedMessage.recordId}`);
     }
 
     if (record.currentStage !== 'import' || record.status === 'completed') {
       context.log('importVideoFromUrl skipping stale import job', {
-        recordId: message.recordId,
+        recordId: parsedMessage.recordId,
         currentStage: record.currentStage,
         status: record.status,
+        dequeueCount,
+        retryCount,
       });
       return;
     }
 
-    const importStartedAt = await recordStore.markImportProcessing(message.recordId);
-    const { containerClient, blockBlobClient } = getImportedBlobClient(message.sourceContainer, message.sourceBlobName);
+    const importStartedAt = await recordStore.markImportProcessing(parsedMessage.recordId, retryCount);
+    const { containerClient, blockBlobClient } = getImportedBlobClient(parsedMessage.sourceContainer, parsedMessage.sourceBlobName);
     await containerClient.createIfNotExists();
     const blobUrl = await downloadVideoToBlob(
-      message.requestedVideoUrl,
+      parsedMessage.requestedVideoUrl,
       blockBlobClient,
       getMaxVideoBytes()
     );
@@ -79,40 +118,55 @@ export async function importVideoFromUrlHandler(queueEntry: unknown, context: In
       version: 1,
       jobType: 'convert',
       jobToken: randomUUID(),
-      recordId: message.recordId,
-      sourceContainer: message.sourceContainer,
-      sourceBlobName: message.sourceBlobName,
+      recordId: parsedMessage.recordId,
+      sourceContainer: parsedMessage.sourceContainer,
+      sourceBlobName: parsedMessage.sourceBlobName,
     };
 
     await convertQueue.enqueue(convertJob);
     await recordStore.markImportCompletedAndQueueConvert(
-      message.recordId,
+      parsedMessage.recordId,
       blobUrl,
       importStartedAt,
       convertJob.jobToken
     );
 
     context.log('importVideoFromUrl uploaded blob and queued convert job', {
-      recordId: message.recordId,
-      sourceBlobName: message.sourceBlobName,
+      recordId: parsedMessage.recordId,
+      sourceBlobName: parsedMessage.sourceBlobName,
       convertJobToken: convertJob.jobToken,
+      dequeueCount,
+      retryCount,
     });
   } catch (error) {
-    const message = getErrorMessage(error);
-    context.error('importVideoFromUrl failed', error);
+    const errorMessage = getErrorMessage(error);
+    context.error('importVideoFromUrl failed', {
+      recordId: parsedMessage?.recordId,
+      sourceBlobName: parsedMessage?.sourceBlobName,
+      dequeueCount,
+      retryCount,
+      errorMessage,
+    });
+    context.error(error);
 
-    if (typeof queueEntry === 'string' || (typeof queueEntry === 'object' && queueEntry !== null)) {
+    if (parsedMessage && error instanceof VideoDownloadError) {
       try {
-        const parsed = parseQueueMessage(queueEntry);
-        await recordStore.markImportFailed(parsed.recordId, message);
+        const effectiveRecordStore = recordStore ?? getVideoRecordStore();
+        await effectiveRecordStore.markImportFailed(parsedMessage.recordId, errorMessage, retryCount);
       } catch (markError) {
         context.error('Failed to mark import job as failed', markError);
+        throw markError;
       }
-    }
-
-    if (error instanceof VideoDownloadError) {
       return;
     }
+
+    context.warn('importVideoFromUrl will rely on queue retry for transient failure', {
+      recordId: parsedMessage?.recordId,
+      sourceBlobName: parsedMessage?.sourceBlobName,
+      dequeueCount,
+      retryCount,
+    });
+    throw error;
   }
 }
 

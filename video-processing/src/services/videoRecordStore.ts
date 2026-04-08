@@ -221,13 +221,14 @@ export class VideoRecordStore {
     return startedAt;
   }
 
-  async markImportProcessing(recordId: string): Promise<string> {
+  async markImportProcessing(recordId: string, retryCount = 0): Promise<string> {
     const startedAt = new Date().toISOString();
     await this.update(recordId, {
       status: 'processing',
       currentStage: 'import',
       processingStartedAt: startedAt,
       importStartedAt: startedAt,
+      importRetryCount: retryCount,
       importErrorMessage: '',
       importFailedAt: '',
       errorMessage: '',
@@ -262,13 +263,14 @@ export class VideoRecordStore {
     });
   }
 
-  async markImportFailed(recordId: string, errorMessage: string): Promise<void> {
+  async markImportFailed(recordId: string, errorMessage: string, retryCount = 0): Promise<void> {
     const failedAt = new Date().toISOString();
     await this.update(recordId, {
       status: 'failed',
       currentStage: 'failed',
       failedAt,
       importFailedAt: failedAt,
+      importRetryCount: retryCount,
       importErrorMessage: errorMessage,
       errorMessage,
     });

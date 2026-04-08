@@ -351,35 +351,50 @@ jobs:
         tenant-id: ${{ secrets.AZURE_TENANT_ID }}
         subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-    - name: Wait for Function App to be ready
+    - name: Wait for Function App import path to be ready
       run: |
         timeout_seconds="${{ inputs.function_ready_timeout_seconds }}"
         poll_interval_seconds=15
-        expected_function="queueVideoUploadBlob"
+        expected_functions=(
+          "queueVideoUploadBlob"
+          "queueVideoUrlImport"
+          "importVideoFromUrl"
+        )
         deadline=$((SECONDS + timeout_seconds))
 
-        echo "Waiting up to ${timeout_seconds}s for Function App to expose ${expected_function}..."
+        echo "Waiting up to ${timeout_seconds}s for Function App to expose upload and URL-import functions..."
 
         while true; do
           function_names="$(az functionapp function list \
             --name ${{ env.AZURE_FUNCTIONAPP_NAME }} \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
             --query "[].name" -o tsv 2>/dev/null || true)"
+          missing_functions=()
 
-          if printf '%s\n' "$function_names" | grep -q "$expected_function"; then
+          for expected_function in "${expected_functions[@]}"; do
+            if ! printf '%s\n' "$function_names" | grep -q "$expected_function"; then
+              missing_functions+=("$expected_function")
+            fi
+          done
+
+          if [ "${#missing_functions[@]}" -eq 0 ]; then
             echo "Function App is ready."
             printf '%s\n' "$function_names"
+            echo "Waiting ${poll_interval_seconds}s for trigger listeners to stabilize..."
+            sleep "$poll_interval_seconds"
             break
           fi
 
           if [ "$SECONDS" -ge "$deadline" ]; then
             echo "Timed out waiting for Function App readiness after ${timeout_seconds}s."
+            echo "Missing functions: ${missing_functions[*]}"
             echo "Last observed functions:"
             printf '%s\n' "$function_names"
             exit 1
           fi
 
-          echo "Function not ready yet; retrying in ${poll_interval_seconds}s..."
+          echo "Missing functions: ${missing_functions[*]}"
+          echo "Function App not ready yet; retrying in ${poll_interval_seconds}s..."
           sleep "$poll_interval_seconds"
         done
 
@@ -435,4 +450,6 @@ jobs:
     - name: Import sample video URL
       env:
         WEB_APP_BASE_URL: https://${{ env.AZURE_WEBAPP_NAME }}.azurewebsites.net
+        SAMPLE_IMPORT_STATUS_MAX_ATTEMPTS: '30'
+        SAMPLE_IMPORT_STATUS_RETRY_DELAY_MS: '10000'
       run: node deployment/scripts/import-sample-video.mjs
